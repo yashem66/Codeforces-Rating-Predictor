@@ -3,3 +3,5 @@ export * from './elo.js';
 export * from './newAccount.js';
 export * from './rating.js';
 export * from './performance.js';
+export * from './fft.js';
+export * from './ratingFast.js';
