@@ -28,22 +28,20 @@ export async function runValidateAll(deps: RunValidateAllDeps): Promise<RunValid
   const ratingFn = deps.ratingFn ?? computeRatingChangesFast;
   const contests = await deps.listContests();
 
-  // 第一遍：抓取全部 ratingChanges，建立全局参赛索引
+  // 第一遍：抓取全部 ratingChanges，建立全局参赛索引；不在内存保留行（防 OOM，第二遍走缓存重读）。
   const index = new ParticipationIndex();
-  const rowsById = new Map<number, ApiRatingChange[]>();
   for (const meta of contests) {
     const rows = await deps.getRatingChanges(meta.id);
-    rowsById.set(meta.id, rows);
     if (rows.length > 0) index.addContest(rows);
     deps.onProgress?.(`indexed ${meta.id} (${rows.length} rows)`);
   }
   index.finalize();
 
-  // 第二遍：验证窗口内的比赛
+  // 第二遍：仅对窗口内比赛重读（缓存命中）并验证。
   const validated: { contestId: number; report: ContestReport }[] = [];
   for (const meta of contests) {
     if (meta.startTimeSeconds < deps.validateFromSec) continue;
-    const rows = rowsById.get(meta.id)!;
+    const rows = await deps.getRatingChanges(meta.id);
     if (rows.length === 0) continue;
     const contestTime = rows[0]!.ratingUpdateTimeSeconds;
     const priorCounts = new Map<string, number>();

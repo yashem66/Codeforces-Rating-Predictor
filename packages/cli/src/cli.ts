@@ -1,9 +1,10 @@
 #!/usr/bin/env tsx
 import { writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { computeRatingChangesFast } from '@crp/core';
 import { CodeforcesApi } from './api.js';
 import { JsonCache } from './cache.js';
-import { SAMPLE_CONTEST_IDS, fetchContestData } from './dataset.js';
+import { SAMPLE_CONTEST_IDS } from './dataset.js';
 import { validateContest, type ContestReport } from './validate.js';
 import { aggregate, formatReport } from './report.js';
 import { listFinishedContests } from './contests.js';
@@ -37,17 +38,20 @@ async function main(): Promise<void> {
       const ids = parseTargets(target);
       for (const id of ids) {
         process.stdout.write(`fetching ${id} ...\n`);
-        await fetchContestData(api, id);
+        const rows = await api.getRatingChanges(id);
+        process.stdout.write(`  ${id}: ${rows.length} rows\n`);
       }
       process.stdout.write(`done: cached ${ids.length} contests\n`);
       break;
     }
     case 'validate': {
+      // 样本检查点：按成熟用户假设（空 priorCounts -> 偏移 0）快速校验核心算法；
+      // 新账号会作为 mismatch 出现在 worst 列表，全量验证（validate-all）才用索引精确求 k。
       const ids = parseTargets(target);
       const items: { contestId: number; report: ContestReport }[] = [];
       for (const id of ids) {
-        const { rows, priorCounts } = await fetchContestData(api, id);
-        const report = validateContest(rows, priorCounts);
+        const rows = await api.getRatingChanges(id);
+        const report = validateContest(rows, new Map(), computeRatingChangesFast);
         items.push({ contestId: id, report });
         process.stdout.write(formatReport(id, report) + '\n\n');
       }
