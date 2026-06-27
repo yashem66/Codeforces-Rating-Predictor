@@ -1,0 +1,11 @@
+---
+description: 项目级工程约定
+alwaysApply: true
+---
+
+- `@crp/core` 保持纯函数、零 I/O；不要在 core 中引入 `node:`、`fs`、`fetch`。
+- rating 计算统一在“计算分（1400 基准）”空间；显示分↔计算分换算只在 `@crp/cli` 边界进行。
+- CF 参考实现使用整数截断除法，对应 TS 代码必须使用 `Math.trunc`。
+- 遵循 TDD：先写失败测试，再实现；未实际运行测试前不得声称通过。
+- 提交信息使用 Conventional Commits（feat/fix/docs/chore/test）。
+- Shell 命令必须带 `required_permissions: ["all"]`；PowerShell 下不要用 tail/head/grep。
