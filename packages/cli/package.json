@@ -1,0 +1,21 @@
+{
+  "name": "@crp/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "crp": "./src/cli.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "crp": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@crp/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1"
+  }
+}
