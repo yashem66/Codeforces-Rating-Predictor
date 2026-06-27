@@ -69,7 +69,15 @@ async function main(): Promise<void> {
       process.stdout.write(`enumerated ${contests.length} finished contests\n`);
       let rated = 0;
       for (const meta of contests) {
-        const rows = await api.getRatingChanges(meta.id);
+        let rows: Awaited<ReturnType<CodeforcesApi['getRatingChanges']>>;
+        try {
+          rows = await api.getRatingChanges(meta.id);
+        } catch (err) {
+          process.stdout.write(
+            `  ${meta.id} ${meta.name}: SKIP (${err instanceof Error ? err.message : String(err)})\n`,
+          );
+          continue;
+        }
         if (rows.length > 0) rated++;
         process.stdout.write(`  ${meta.id} ${meta.name}: ${rows.length} rows\n`);
       }

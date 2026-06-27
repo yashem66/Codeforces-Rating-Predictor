@@ -31,7 +31,13 @@ export async function runValidateAll(deps: RunValidateAllDeps): Promise<RunValid
   // 第一遍：抓取全部 ratingChanges，建立全局参赛索引；不在内存保留行（防 OOM，第二遍走缓存重读）。
   const index = new ParticipationIndex();
   for (const meta of contests) {
-    const rows = await deps.getRatingChanges(meta.id);
+    let rows: ApiRatingChange[];
+    try {
+      rows = await deps.getRatingChanges(meta.id);
+    } catch (err) {
+      deps.onProgress?.(`skip ${meta.id}: ${err instanceof Error ? err.message : String(err)}`);
+      continue;
+    }
     if (rows.length > 0) index.addContest(rows);
     deps.onProgress?.(`indexed ${meta.id} (${rows.length} rows)`);
   }
@@ -41,7 +47,13 @@ export async function runValidateAll(deps: RunValidateAllDeps): Promise<RunValid
   const validated: { contestId: number; report: ContestReport }[] = [];
   for (const meta of contests) {
     if (meta.startTimeSeconds < deps.validateFromSec) continue;
-    const rows = await deps.getRatingChanges(meta.id);
+    let rows: ApiRatingChange[];
+    try {
+      rows = await deps.getRatingChanges(meta.id);
+    } catch (err) {
+      deps.onProgress?.(`skip ${meta.id}: ${err instanceof Error ? err.message : String(err)}`);
+      continue;
+    }
     if (rows.length === 0) continue;
     const contestTime = rows[0]!.ratingUpdateTimeSeconds;
     const priorCounts = new Map<string, number>();

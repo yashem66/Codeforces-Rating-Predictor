@@ -33,8 +33,16 @@ export class CodeforcesApi {
     this.lastCallAt = Date.now();
   }
 
-  /** 匿名 GET 调用；method 形如 'contest.ratingChanges'，params 为查询参数。 */
-  private async call<T>(method: string, params: Record<string, string>): Promise<T> {
+  /**
+   * 匿名 GET 调用；method 形如 'contest.ratingChanges'，params 为查询参数。
+   * opts.emptyOnFailed：当 FAILED 的 comment 匹配该正则时，把 emptyValue 当作结果缓存并返回
+   * （用于“评分变化不可用/未计分/未找到”等永久性空结果，避免每次重抓）。
+   */
+  private async call<T>(
+    method: string,
+    params: Record<string, string>,
+    opts?: { emptyValue: T; emptyOnFailed: RegExp },
+  ): Promise<T> {
     const qs = new URLSearchParams(params).toString();
     const cacheKey = `${method}?${qs}`;
     const cached = await this.cache.get<T>(cacheKey);
@@ -53,6 +61,10 @@ export class CodeforcesApi {
           await this.cache.set(cacheKey, body.result);
           return body.result;
         }
+        if (opts && opts.emptyOnFailed.test(body.comment)) {
+          await this.cache.set(cacheKey, opts.emptyValue);
+          return opts.emptyValue;
+        }
         if (/limit exceeded/i.test(body.comment)) {
           throw new Error(body.comment);
         }
@@ -67,9 +79,11 @@ export class CodeforcesApi {
   }
 
   getRatingChanges(contestId: number): Promise<ApiRatingChange[]> {
-    return this.call<ApiRatingChange[]>('contest.ratingChanges', {
-      contestId: String(contestId),
-    });
+    return this.call<ApiRatingChange[]>(
+      'contest.ratingChanges',
+      { contestId: String(contestId) },
+      { emptyValue: [], emptyOnFailed: /unavailable|not rated|unrated|not found|hidden/i },
+    );
   }
 
   getUserRating(handle: string): Promise<ApiUserRatingEntry[]> {

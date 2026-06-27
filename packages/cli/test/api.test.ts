@@ -43,7 +43,7 @@ describe('CodeforcesApi.getRatingChanges', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('status=FAILED 抛出包含 comment 的错误', async () => {
+  it('status=FAILED（非可跳过）抛出包含 comment 的错误', async () => {
     const fetchMock = vi.fn(
       async () =>
         new Response(JSON.stringify({ status: 'FAILED', comment: 'boom' }), { status: 200 }),
@@ -51,5 +51,25 @@ describe('CodeforcesApi.getRatingChanges', () => {
     vi.stubGlobal('fetch', fetchMock);
     const api = new CodeforcesApi({ cache: new JsonCache(dir), minIntervalMs: 0, maxRetries: 0 });
     await expect(api.getRatingChanges(2)).rejects.toThrow(/boom/);
+  });
+
+  it('“rating changes unavailable” 视为空结果并缓存（不重抓、不抛错）', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            status: 'FAILED',
+            comment: 'contestId: Rating changes are unavailable for this contest',
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const api = new CodeforcesApi({ cache: new JsonCache(dir), minIntervalMs: 0, maxRetries: 0 });
+    const a = await api.getRatingChanges(3);
+    const b = await api.getRatingChanges(3);
+    expect(a).toEqual([]);
+    expect(b).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // 第二次走缓存
   });
 });
