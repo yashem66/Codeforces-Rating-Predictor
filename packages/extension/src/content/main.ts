@@ -5,8 +5,12 @@ import { injectColumns } from './inject.js';
 import { parseContestId, findStandingsTables } from './standings.js';
 import type { RowData } from '../types.js';
 
-async function main(): Promise<void> {
-  const contestId = parseContestId(location.href);
+/**
+ * 内容脚本核心逻辑（可注入 url/doc，便于测试）。
+ * 运行时由 main() 以 location.href 和 document 调用。
+ */
+export async function runContentScript(url: string, doc: Document = document): Promise<void> {
+  const contestId = parseContestId(url);
   if (contestId === null) return;
 
   const settings = await getSettings();
@@ -50,7 +54,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const tables = findStandingsTables();
+  const tables = findStandingsTables(doc);
   for (const table of tables) {
     try {
       injectColumns(table, dataMap, settings);
@@ -58,6 +62,10 @@ async function main(): Promise<void> {
       console.warn('[CRP] Failed to inject columns:', e);
     }
   }
+}
+
+async function main(): Promise<void> {
+  return runContentScript(location.href, document);
 }
 
 main().catch((e) => console.warn('[CRP] Unhandled error:', e));
