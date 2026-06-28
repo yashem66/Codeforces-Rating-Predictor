@@ -181,18 +181,23 @@ export async function getStandings(contestId: number): Promise<StandingsRow[]> {
   }
 }
 
-/** 分批获取用户 rating 信息（每批 ≤ 300，5 批并发，避免 URL 过长） */
+/** 分批获取用户 rating 信息（每批 ≤ 300，10 批并发，避免 URL 过长） */
 export async function getUserInfos(handles: string[]): Promise<UserInfo[]> {
   // 300 handles × 平均 12 字符 ≈ 3600 字符，安全通过 nginx 8KB URL 限制
   const BATCH = 300;
-  const CONCURRENCY = 5;
+  const CONCURRENCY = 8;
   const results: UserInfo[] = [];
   const toFetch: string[] = [];
 
-  // 先查内存缓存
-  for (const handle of handles) {
-    const cacheKey = `userRating:${handle}`;
-    const cached = await getCached<number | null>(cacheKey);
+  // 并行查缓存
+  const cacheEntries = await Promise.all(
+    handles.map(async (handle) => {
+      const cacheKey = `userRating:${handle}`;
+      const cached = await getCached<number | null>(cacheKey);
+      return { handle, cached };
+    }),
+  );
+  for (const { handle, cached } of cacheEntries) {
     if (cached !== undefined) {
       const info: UserInfo = cached !== null ? { handle, rating: cached } : { handle };
       results.push(info);
@@ -220,16 +225,64 @@ export async function getUserInfos(handles: string[]): Promise<UserInfo[]> {
         cfFetch<RawUser[]>('user.info', { handles: chunk.join(';') }),
       ),
     );
+    const cacheWrites: Promise<void>[] = [];
     for (const batchResult of batchResults) {
       for (const u of batchResult) {
         const info: UserInfo = u.rating !== undefined ? { handle: u.handle, rating: u.rating } : { handle: u.handle };
         results.push(info);
-        await setCached<number | null>(`userRating:${u.handle}`, u.rating ?? null, RATINGS_TTL_MS);
+        cacheWrites.push(setCached<number | null>(`userRating:${u.handle}`, u.rating ?? null, RATINGS_TTL_MS));
       }
     }
+    await Promise.all(cacheWrites);
   }
 
   return results;
+}
+
+/** 在 DOM 抓榜期间并行预取 user.info，减少抓榜完成后的等待 */
+export class UserRatingPrefetcher {
+  private pending = new Set<string>();
+  private draining: Promise<void> = Promise.resolve();
+  private drainTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly debounceMs: number;
+
+  constructor(debounceMs = 600) {
+    this.debounceMs = debounceMs;
+  }
+
+  add(handles: string[]): void {
+    for (const handle of handles) {
+      this.pending.add(handle);
+    }
+    this.scheduleDrain();
+  }
+
+  private scheduleDrain(): void {
+    if (this.drainTimer !== null) return;
+    this.drainTimer = setTimeout(() => {
+      this.drainTimer = null;
+      this.draining = this.draining.then(() => this.drainLoop());
+    }, this.debounceMs);
+  }
+
+  private async drainLoop(): Promise<void> {
+    while (this.pending.size > 0) {
+      const batch = [...this.pending].slice(0, 300);
+      for (const handle of batch) {
+        this.pending.delete(handle);
+      }
+      await getUserInfos(batch);
+    }
+  }
+
+  async flush(): Promise<void> {
+    if (this.drainTimer !== null) {
+      clearTimeout(this.drainTimer);
+      this.drainTimer = null;
+      this.draining = this.draining.then(() => this.drainLoop());
+    }
+    await this.draining;
+  }
 }
 
 /** 仅供测试：清空内存缓存 */

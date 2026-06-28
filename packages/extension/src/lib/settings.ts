@@ -3,6 +3,7 @@ import type { Settings } from '../types.js';
 const DEFAULT_SETTINGS: Settings = {
   showRating: true,
   showDelta: true,
+  debugForceDomPredict: false,
 };
 
 const STORAGE_KEY = 'crp_settings';
@@ -25,6 +26,8 @@ export async function getSettings(): Promise<Settings> {
       resolve({
         showRating: stored?.showRating ?? DEFAULT_SETTINGS.showRating,
         showDelta: stored?.showDelta ?? DEFAULT_SETTINGS.showDelta,
+        debugForceDomPredict:
+          stored?.debugForceDomPredict ?? DEFAULT_SETTINGS.debugForceDomPredict,
       });
     });
   });

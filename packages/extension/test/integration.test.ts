@@ -110,7 +110,11 @@ function stubChromeDefaults(): void {
   });
 }
 
-function stubChromeSettings(settings: { showRating?: boolean; showDelta?: boolean }): void {
+function stubChromeSettings(settings: {
+  showRating?: boolean;
+  showDelta?: boolean;
+  debugForceDomPredict?: boolean;
+}): void {
   vi.stubGlobal('chrome', {
     storage: {
       local: {

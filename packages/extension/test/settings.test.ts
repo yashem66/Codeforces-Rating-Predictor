@@ -12,7 +12,7 @@ afterEach(() => {
 describe('getSettings (no chrome)', () => {
   it('returns defaults when chrome is not available', async () => {
     const settings = await getSettings();
-    expect(settings).toEqual({ showRating: true, showDelta: true });
+    expect(settings).toEqual({ showRating: true, showDelta: true, debugForceDomPredict: false });
   });
 });
 
@@ -24,7 +24,7 @@ describe('setSettings (no chrome)', () => {
 
 describe('getSettings (with chrome stub)', () => {
   it('returns stored settings from chrome.storage', async () => {
-    const stored = { showRating: false, showDelta: true };
+    const stored = { showRating: false, showDelta: true, debugForceDomPredict: true };
     vi.stubGlobal('chrome', {
       storage: {
         local: {
@@ -38,6 +38,7 @@ describe('getSettings (with chrome stub)', () => {
     const settings = await getSettings();
     expect(settings.showRating).toBe(false);
     expect(settings.showDelta).toBe(true);
+    expect(settings.debugForceDomPredict).toBe(true);
   });
 
   it('merges partial stored settings with defaults', async () => {
@@ -54,6 +55,7 @@ describe('getSettings (with chrome stub)', () => {
     const settings = await getSettings();
     expect(settings.showRating).toBe(false);
     expect(settings.showDelta).toBe(true); // default
+    expect(settings.debugForceDomPredict).toBe(false); // default
   });
 
   it('returns defaults when nothing is stored', async () => {
@@ -68,7 +70,7 @@ describe('getSettings (with chrome stub)', () => {
       },
     });
     const settings = await getSettings();
-    expect(settings).toEqual({ showRating: true, showDelta: true });
+    expect(settings).toEqual({ showRating: true, showDelta: true, debugForceDomPredict: false });
   });
 });
 

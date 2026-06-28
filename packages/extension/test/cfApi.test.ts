@@ -3,6 +3,7 @@ import {
   getRatingChanges,
   getStandings,
   getUserInfos,
+  UserRatingPrefetcher,
   _clearMemCache,
   _api,
 } from '../src/lib/cfApi.js';
@@ -136,5 +137,29 @@ describe('getUserInfos', () => {
     mockFetch.mockResolvedValueOnce(makeOk(data));
     const infos = await getUserInfos(handles);
     expect(infos).toHaveLength(3);
+  });
+});
+
+describe('UserRatingPrefetcher', () => {
+  it('prefetches ratings so a later getUserInfos hits cache', async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        makeOk([
+          { handle: 'alice', rating: 1600 },
+          { handle: 'bob', rating: 1700 },
+        ]),
+      )
+      .mockResolvedValueOnce(makeOk([{ handle: 'carol', rating: 1800 }]));
+
+    const prefetcher = new UserRatingPrefetcher();
+    prefetcher.add(['alice', 'bob']);
+    await prefetcher.flush();
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    const infos = await getUserInfos(['alice', 'bob', 'carol']);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(infos.find((u) => u.handle === 'alice')!.rating).toBe(1600);
+    expect(infos.find((u) => u.handle === 'carol')!.rating).toBe(1800);
   });
 });

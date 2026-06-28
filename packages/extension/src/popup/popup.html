@@ -42,6 +42,12 @@
       <input type="checkbox" id="showDelta" />
       Show Pred Δ column
     </label>
+    <label
+      title="Ignore ratingChanges and standings API; scrape standings from page HTML only. For manual testing."
+    >
+      <input type="checkbox" id="debugForceDomPredict" />
+      Debug: force DOM scrape
+    </label>
     <div id="status"></div>
     <script type="module" src="./popup.ts"></script>
   </body>

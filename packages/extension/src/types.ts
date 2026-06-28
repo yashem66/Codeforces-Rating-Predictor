@@ -27,6 +27,8 @@ export interface UserInfo {
 export interface Settings {
   showRating: boolean;
   showDelta: boolean;
+  /** 调试：强制从页面 DOM 抓取榜单并走预测（忽略 ratingChanges / standings API） */
+  debugForceDomPredict: boolean;
 }
 
 /** 注入列所需的单行数据 */
