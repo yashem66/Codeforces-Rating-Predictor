@@ -57,7 +57,7 @@ export async function runValidateAll(deps: RunValidateAllDeps): Promise<RunValid
     if (rows.length === 0) continue;
     const contestTime = rows[0]!.ratingUpdateTimeSeconds;
     const priorCounts = new Map<string, number>();
-    for (const r of rows) priorCounts.set(r.handle, index.priorCount(r.handle, contestTime));
+    for (const r of rows) priorCounts.set(r.handle, index.effectiveK(r.handle, contestTime));
     const report = validateContest(rows, priorCounts, ratingFn);
     validated.push({ contestId: meta.id, report });
     deps.onProgress?.(`validated ${meta.id} exact=${(report.exactRate * 100).toFixed(1)}%`);

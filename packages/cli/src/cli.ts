@@ -19,8 +19,9 @@ import { runValidateAll } from './full.js';
 
 const DATA_DIR = join(process.cwd(), 'data', 'cache');
 
+// 索引需覆盖 CF 全历史，才能得到准确 k 与“是否新体系账号”的判定（默认从 0 起）。
 const INDEX_FROM = Math.floor(
-  Date.parse(process.env.CRP_INDEX_FROM ?? '2020-05-01T00:00:00Z') / 1000,
+  Date.parse(process.env.CRP_INDEX_FROM ?? '2010-01-01T00:00:00Z') / 1000,
 );
 const VALIDATE_FROM = Math.floor(
   Date.parse(process.env.CRP_VALIDATE_FROM ?? '2022-01-01T00:00:00Z') / 1000,
@@ -116,6 +117,7 @@ async function main(): Promise<void> {
       // 用缓存重建全局参赛索引（全部命中缓存，较快）。
       const contests = await listFinishedContests(api, INDEX_FROM, NOW_SEC);
       const index = new ParticipationIndex();
+      let indexedContests = 0;
       for (const meta of contests) {
         let rows;
         try {
@@ -123,17 +125,50 @@ async function main(): Promise<void> {
         } catch {
           continue;
         }
-        if (rows.length > 0) index.addContest(rows);
+        if (rows.length > 0) {
+          index.addContest(rows);
+          indexedContests++;
+        }
       }
       index.finalize();
+      const ist = index.stats();
+      process.stdout.write(
+        `INDEX: enumerated=${contests.length} ratedIndexed=${indexedContests} ` +
+          `handles=${ist.handles} totalEntries=${ist.totalEntries} maxEntriesPerHandle=${ist.maxEntries}\n`,
+      );
 
       const rows = await api.getRatingChanges(id);
       const contestTime = rows[0]!.ratingUpdateTimeSeconds;
       const naive = process.env.CRP_NAIVE === '1';
       const fn = naive ? computeRatingChanges : computeRatingChangesFast;
 
+      const kEffOf = (handle: string): number => index.effectiveK(handle, contestTime);
+
+      // 调试：dump 前若干成熟用户(k>=6, 无 boost) 的 myCalcDelta vs actualCalcDelta。
+      {
+        const pre = fn(
+          rows.map((r) => ({
+            party: r.handle,
+            rank: r.rank,
+            rating: displayToCalc(r.oldRating, kEffOf(r.handle)),
+          })),
+        );
+        const m = new Map(pre.map((c) => [c.party, c.delta]));
+        let d2 = 0;
+        for (const r of rows) {
+          if (index.priorCount(r.handle, contestTime) >= 6) {
+            const my = m.get(r.handle)!;
+            const act = r.newRating - r.oldRating;
+            process.stdout.write(
+              `  k>=6 ${r.handle}: old=${r.oldRating} rank=${r.rank} myDelta=${my} actDelta=${act} diff=${my - act}\n`,
+            );
+            if (++d2 >= 8) break;
+          }
+        }
+      }
+
       const contestants: Contestant[] = rows.map((r) => {
-        const k = index.priorCount(r.handle, contestTime);
+        const k = kEffOf(r.handle);
         return { party: r.handle, rank: r.rank, rating: displayToCalc(r.oldRating, k) };
       });
       const changes = fn(contestants);
@@ -153,7 +188,7 @@ async function main(): Promise<void> {
       const kStats = { newN: 0, newExact: 0, matureN: 0, matureExact: 0 };
 
       for (const r of rows) {
-        const k = index.priorCount(r.handle, contestTime);
+        const k = kEffOf(r.handle);
         const ch = byParty.get(r.handle)!;
         const predDisplay = calcToDisplay(ch.newRating, k + 1);
         const signed = predDisplay - r.newRating;
@@ -175,6 +210,25 @@ async function main(): Promise<void> {
         }
       }
 
+      let sumPred = 0;
+      let sumActual = 0;
+      let sumMyCalcDelta = 0;
+      let sumMyBoost = 0;
+      const offsets = [1400, 900, 550, 300, 150, 50, 0];
+      const off = (kk: number): number => offsets[Math.min(kk, 6)]!;
+      for (const r of rows) {
+        const k = kEffOf(r.handle);
+        const ch = byParty.get(r.handle)!;
+        sumPred += calcToDisplay(ch.newRating, k + 1) - r.oldRating;
+        sumActual += r.newRating - r.oldRating;
+        sumMyCalcDelta += ch.delta;
+        sumMyBoost += off(k) - off(k + 1);
+      }
+      process.stdout.write(
+        `DEBUG sumPredDelta=${sumPred} sumActualDelta=${sumActual} ` +
+          `meanPred=${(sumPred / rows.length).toFixed(2)} meanActual=${(sumActual / rows.length).toFixed(2)}\n` +
+          `DEBUG sumMyCalcDelta=${sumMyCalcDelta} sumMyBoost=${sumMyBoost} n=${rows.length}\n`,
+      );
       process.stdout.write(`diag contest ${id} (n=${rows.length}, algo=${naive ? 'naive' : 'fast'})\n`);
       process.stdout.write(`band        n     exact%   meanSigned  meanAbs\n`);
       for (const s of stats) {
@@ -190,9 +244,56 @@ async function main(): Promise<void> {
       );
       break;
     }
+    case 'checkk': {
+      const id = Number(target);
+      if (!Number.isInteger(id) || id <= 0) throw new Error(`invalid contest id: ${target}`);
+      const NEW_SYSTEM = Math.floor(Date.parse('2020-05-01T00:00:00Z') / 1000);
+
+      // 建索引（缓存）
+      const contests = await listFinishedContests(api, INDEX_FROM, NOW_SEC);
+      const index = new ParticipationIndex();
+      for (const meta of contests) {
+        let rs;
+        try {
+          rs = await api.getRatingChanges(meta.id);
+        } catch {
+          continue;
+        }
+        if (rs.length > 0) index.addContest(rs);
+      }
+      index.finalize();
+
+      const rows = await api.getRatingChanges(id);
+      const contestTime = rows[0]!.ratingUpdateTimeSeconds;
+      // 抽样 ~40 个用户，用 user.rating 取真实 k 对比索引 k
+      const sample = Math.max(1, Math.floor(rows.length / 40));
+      let mismatches = 0;
+      let checked = 0;
+      let preNew = 0;
+      for (let i = 0; i < rows.length; i += sample) {
+        const r = rows[i]!;
+        const hist = await api.getUserRating(r.handle);
+        const trueK = hist.filter((h) => h.ratingUpdateTimeSeconds < contestTime).length;
+        const idxK = index.priorCount(r.handle, contestTime);
+        const firstTime = hist.length > 0 ? hist[0]!.ratingUpdateTimeSeconds : contestTime;
+        const isPreNew = firstTime < NEW_SYSTEM;
+        if (isPreNew) preNew++;
+        checked++;
+        if (trueK !== idxK || (isPreNew && idxK < 6)) {
+          mismatches++;
+          process.stdout.write(
+            `  ${r.handle}: idxK=${idxK} trueK=${trueK} firstBefore2020-05=${isPreNew} old=${r.oldRating}\n`,
+          );
+        }
+      }
+      process.stdout.write(
+        `checkk ${id}: checked=${checked} mismatches=${mismatches} preNewSystem=${preNew}\n`,
+      );
+      break;
+    }
     default:
       process.stdout.write(
-        'usage: crp <fetch|validate|fetch-all|validate-all|diag> [contestId|sample]\n',
+        'usage: crp <fetch|validate|fetch-all|validate-all|diag|checkk> [contestId|sample]\n',
       );
       process.exitCode = 1;
   }
