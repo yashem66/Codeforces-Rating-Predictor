@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach } from 'vitest';
-import { injectColumns } from '../src/content/inject.js';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { injectColumns, ratingColor } from '../src/content/inject.js';
 import type { RowData } from '../src/types.js';
 
 /** 构造一个简单的 standings 表格 */
@@ -52,14 +52,59 @@ function buildData(): Map<string, RowData> {
   ]);
 }
 
+// ── ratingColor 单元测试 ──────────────────────────────────────────────────────
+describe('ratingColor', () => {
+  it('returns gray for rating < 1200', () => {
+    expect(ratingColor(1199)).toBe('#808080');
+    expect(ratingColor(0)).toBe('#808080');
+  });
+
+  it('returns green for 1200 <= rating < 1400', () => {
+    expect(ratingColor(1200)).toBe('#008000');
+    expect(ratingColor(1399)).toBe('#008000');
+  });
+
+  it('returns teal for 1400 <= rating < 1600', () => {
+    expect(ratingColor(1400)).toBe('#03a89e');
+    expect(ratingColor(1500)).toBe('#03a89e');
+  });
+
+  it('returns blue for 1600 <= rating < 1900', () => {
+    expect(ratingColor(1600)).toBe('#0000ff');
+    expect(ratingColor(1700)).toBe('#0000ff');
+  });
+
+  it('returns purple for 1900 <= rating < 2100', () => {
+    expect(ratingColor(1900)).toBe('#aa00aa');
+    expect(ratingColor(2000)).toBe('#aa00aa');
+  });
+
+  it('returns orange for 2100 <= rating < 2400', () => {
+    expect(ratingColor(2100)).toBe('#ff8c00');
+    expect(ratingColor(2200)).toBe('#ff8c00');
+  });
+
+  it('returns red for rating >= 2400', () => {
+    expect(ratingColor(2400)).toBe('#ff0000');
+    expect(ratingColor(3000)).toBe('#ff0000');
+  });
+});
+
+// ── injectColumns 测试 ────────────────────────────────────────────────────────
 describe('injectColumns', () => {
   let table: HTMLTableElement;
   let data: Map<string, RowData>;
 
   beforeEach(() => {
+    // 清理上次测试注入的样式，保证幂等测试互不干扰
+    document.head.querySelector('#crp-injected-style')?.remove();
     table = buildTable();
     data = buildData();
     document.body.appendChild(table);
+  });
+
+  afterEach(() => {
+    table.remove();
   });
 
   it('injects Rating and Pred Δ headers', () => {
@@ -124,5 +169,24 @@ describe('injectColumns', () => {
     injectColumns(table, data, { showRating: false, showDelta: false });
     expect(table.querySelector('[data-crp-rating]')).toBeNull();
     expect(table.querySelector('[data-crp-delta]')).toBeNull();
+  });
+
+  it('sets inline color on rating cells', () => {
+    injectColumns(table, data, { showRating: true, showDelta: false });
+    const rows = Array.from(table.querySelectorAll('tbody tr'));
+    // alice 有 rating，内联颜色应非空（jsdom 会把 hex 规范化为 rgb(...)）
+    const aliceRatingTd = rows[0]!.querySelector('[data-crp-rating]') as HTMLElement;
+    expect(aliceRatingTd.style.color).not.toBe('');
+    // 最后一行无 rating（显示 "—"），内联颜色应为空
+    const noHandleRow = rows[rows.length - 1]!;
+    const noHandleRatingTd = noHandleRow.querySelector('[data-crp-rating]') as HTMLElement;
+    expect(noHandleRatingTd.style.color).toBe('');
+  });
+
+  it('injects <style> tag exactly once (idempotent)', () => {
+    injectColumns(table, data, { showRating: true, showDelta: true });
+    // 第二次用相同 opts 调用（幂等退出路径），style 只能有一个
+    injectColumns(table, data, { showRating: true, showDelta: true });
+    expect(document.querySelectorAll('#crp-injected-style').length).toBe(1);
   });
 });

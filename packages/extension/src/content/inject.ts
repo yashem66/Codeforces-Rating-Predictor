@@ -4,6 +4,40 @@ import type { RowData } from '../types.js';
 const INJECTED_ATTR = 'data-crp-injected';
 const RATING_ATTR = 'data-crp-rating';
 const DELTA_ATTR = 'data-crp-delta';
+const STYLE_ID = 'crp-injected-style';
+
+/** 返回 CF 段位对应的十六进制颜色字符串（小写） */
+export function ratingColor(rating: number): string {
+  if (rating < 1200) return '#808080';
+  if (rating < 1400) return '#008000';
+  if (rating < 1600) return '#03a89e';
+  if (rating < 1900) return '#0000ff';
+  if (rating < 2100) return '#aa00aa';
+  if (rating < 2400) return '#ff8c00';
+  return '#ff0000';
+}
+
+/** 幂等地向 document.head 注入一次性列宽 + 涨跌色样式 */
+function ensureStyleInjected(doc: Document): void {
+  if (doc.getElementById(STYLE_ID)) return;
+  const style = doc.createElement('style');
+  style.id = STYLE_ID;
+  style.textContent = `
+.standings th[data-crp-rating], .standings td[data-crp-rating],
+.standings th[data-crp-delta], .standings td[data-crp-delta] {
+  width: 4em;
+  text-align: center;
+  white-space: nowrap;
+}
+.standings td[data-crp-rating], .standings td[data-crp-delta] {
+  font-weight: bold;
+}
+.standings td.crp-delta-pos { color: #008000; }
+.standings td.crp-delta-neg { color: #ff0000; }
+.standings td.crp-delta-zero { color: #808080; }
+`;
+  doc.head.appendChild(style);
+}
 
 /** 判断是否是表头行 */
 function isHeaderRow(row: HTMLTableRowElement): boolean {
@@ -82,6 +116,10 @@ export function injectColumns(
   opts: { showRating: boolean; showDelta: boolean },
 ): void {
   if (!opts.showRating && !opts.showDelta) return;
+
+  // 注入列宽 + 涨跌色样式（幂等）
+  ensureStyleInjected(table.ownerDocument);
+
   // 已注入且选项未变 → 幂等退出
   if (table.getAttribute(INJECTED_ATTR) === `${opts.showRating}:${opts.showDelta}`) return;
   // 若已有注入但 opts 变化，先清除旧注入
@@ -154,6 +192,9 @@ export function injectColumns(
       td.setAttribute(RATING_ATTR, '1');
       td.textContent =
         rowData?.rating !== undefined ? String(rowData.rating) : '—';
+      if (rowData?.rating !== undefined) {
+        td.style.color = ratingColor(rowData.rating);
+      }
       refCell.insertAdjacentElement('afterend', td);
     }
 
