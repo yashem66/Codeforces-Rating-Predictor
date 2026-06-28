@@ -10,17 +10,28 @@ import type { RowData } from '../types.js';
  * 运行时由 main() 以 location.href 和 document 调用。
  */
 export async function runContentScript(url: string, doc: Document = document): Promise<void> {
+  console.log('[CRP] content script running on', url);
+
   const contestId = parseContestId(url);
-  if (contestId === null) return;
+  if (contestId === null) {
+    console.warn('[CRP] no contestId parsed from URL, aborting');
+    return;
+  }
+  console.log('[CRP] contestId =', contestId);
 
   const settings = await getSettings();
-  if (!settings.showRating && !settings.showDelta) return;
+  console.log('[CRP] settings =', settings);
+  if (!settings.showRating && !settings.showDelta) {
+    console.warn('[CRP] both columns disabled in settings, aborting');
+    return;
+  }
 
   let dataMap: Map<string, RowData>;
 
   try {
     // 先尝试已结束赛的真实 ratingChanges
     const ratingChanges = await getRatingChanges(contestId);
+    console.log('[CRP] ratingChanges length =', ratingChanges.length);
     if (ratingChanges.length > 0) {
       // 已结束 rated 赛：用真实值
       const finals = finalDeltas(ratingChanges);
@@ -54,7 +65,15 @@ export async function runContentScript(url: string, doc: Document = document): P
     return;
   }
 
+  console.log('[CRP] data ready, entries =', dataMap.size);
+
   const tables = findStandingsTables(doc);
+  console.log('[CRP] standings tables found =', tables.length);
+  if (tables.length === 0) {
+    console.warn(
+      '[CRP] no "table.standings" found on page — the standings table selector may not match this page',
+    );
+  }
   for (const table of tables) {
     try {
       injectColumns(table, dataMap, settings);

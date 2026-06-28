@@ -13,7 +13,7 @@
     "@crp/core": "workspace:*"
   },
   "devDependencies": {
-    "@crxjs/vite-plugin": "2.0.0-beta.23",
+    "@crxjs/vite-plugin": "2.0.0-beta.33",
     "@types/chrome": "^0.0.280",
     "@types/jsdom": "^21.1.7",
     "@types/node": "^26.0.1",
