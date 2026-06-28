@@ -29,10 +29,12 @@ type RatingFn = (contestants: Contestant[]) => RatingChange[];
  *   --((k+1), calcToDisplay)--> 预测显示 newRating，与真值显示 newRating 对比。
  */
 export function validateContest(
-  rows: ApiRatingChange[],
+  allRows: ApiRatingChange[],
   priorCounts: Map<string, number>,
   ratingFn: RatingFn = computeRatingChanges,
 ): ContestReport {
+  // 剔除被 CF 行政清零的异常条目（newRating==0：取消资格/作弊清零），它们非正常评分变化。
+  const rows = allRows.filter((r) => r.newRating !== 0);
   const contestants: Contestant[] = rows.map((r) => {
     const k = priorCounts.get(r.handle) ?? 6; // 默认按成熟用户处理（偏移 0）
     return { party: r.handle, rank: r.rank, rating: displayToCalc(r.oldRating, k) };

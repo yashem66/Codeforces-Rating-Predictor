@@ -19,9 +19,10 @@ import { runValidateAll } from './full.js';
 
 const DATA_DIR = join(process.cwd(), 'data', 'cache');
 
-// 索引需覆盖 CF 全历史，才能得到准确 k 与“是否新体系账号”的判定（默认从 0 起）。
+// 索引覆盖新评分体系生效以来（2020 起）即可：是否新体系账号由“首场 oldRating==0”判定，
+// 老用户最早出现的那场 oldRating>0 即会被正确识别为非新体系（offset 0）。
 const INDEX_FROM = Math.floor(
-  Date.parse(process.env.CRP_INDEX_FROM ?? '2010-01-01T00:00:00Z') / 1000,
+  Date.parse(process.env.CRP_INDEX_FROM ?? '2020-01-01T00:00:00Z') / 1000,
 );
 const VALIDATE_FROM = Math.floor(
   Date.parse(process.env.CRP_VALIDATE_FROM ?? '2022-01-01T00:00:00Z') / 1000,
@@ -241,6 +242,54 @@ async function main(): Promise<void> {
       process.stdout.write(
         `k<6:    n=${kStats.newN} exact=${kStats.newN ? ((kStats.newExact / kStats.newN) * 100).toFixed(1) : '-'}%\n` +
           `k>=6:   n=${kStats.matureN} exact=${kStats.matureN ? ((kStats.matureExact / kStats.matureN) * 100).toFixed(1) : '-'}%\n`,
+      );
+      break;
+    }
+    case 'diagperfect': {
+      // 用 user.rating 为该场所有选手取“完美 k + 是否新体系”，验证算法在零 k 误差下的精度。
+      const id = Number(target);
+      if (!Number.isInteger(id) || id <= 0) throw new Error(`invalid contest id: ${target}`);
+      const NEW_SYSTEM = Math.floor(Date.parse('2020-05-01T00:00:00Z') / 1000);
+      const rows = await api.getRatingChanges(id);
+      const contestTime = rows[0]!.ratingUpdateTimeSeconds;
+      const naive = process.env.CRP_NAIVE === '1';
+      const fn = naive ? computeRatingChanges : computeRatingChangesFast;
+
+      const kEffMap = new Map<string, number>();
+      let done = 0;
+      for (const r of rows) {
+        const hist = await api.getUserRating(r.handle);
+        const before = hist.filter((h) => h.ratingUpdateTimeSeconds < contestTime);
+        const trueK = before.length;
+        const newSystem =
+          hist.length > 0 ? hist[0]!.oldRating === 0 && hist[0]!.ratingUpdateTimeSeconds >= NEW_SYSTEM : false;
+        kEffMap.set(r.handle, newSystem ? trueK : 6);
+        if (++done % 500 === 0) process.stdout.write(`  fetched ${done}/${rows.length}\n`);
+      }
+
+      const validRows = rows.filter((r) => r.newRating !== 0);
+      const contestants: Contestant[] = validRows.map((r) => ({
+        party: r.handle,
+        rank: r.rank,
+        rating: displayToCalc(r.oldRating, kEffMap.get(r.handle)!),
+      }));
+      const changes = fn(contestants);
+      const byParty = new Map(changes.map((c) => [c.party, c]));
+      let exact = 0;
+      let sumAbs = 0;
+      let sumSigned = 0;
+      for (const r of validRows) {
+        const k = kEffMap.get(r.handle)!;
+        const pred = calcToDisplay(byParty.get(r.handle)!.newRating, k + 1);
+        const e = pred - r.newRating;
+        if (e === 0) exact++;
+        sumAbs += Math.abs(e);
+        sumSigned += e;
+      }
+      const nn = validRows.length;
+      process.stdout.write(
+        `diagperfect ${id}: n=${nn} exact=${((exact / nn) * 100).toFixed(1)}% ` +
+          `meanAbs=${(sumAbs / nn).toFixed(2)} meanSigned=${(sumSigned / nn).toFixed(2)}\n`,
       );
       break;
     }
