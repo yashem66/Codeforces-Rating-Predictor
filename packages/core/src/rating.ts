@@ -41,9 +41,15 @@ export function computeRatingChanges(contestants: Contestant[]): RatingChange[] 
   const ratings = contestants.map((c) => c.rating);
   const deltas = new Array<number>(n);
 
+  // 并列名次取该并列组的“最差（最大）位置”，与 CF/TLE 一致：
+  // 并列者占据连续位置，故 effRank = rank + (相同 rank 的人数) - 1。
+  const rankCount = new Map<number, number>();
+  for (const c of contestants) rankCount.set(c.rank, (rankCount.get(c.rank) ?? 0) + 1);
+
   for (let i = 0; i < n; i++) {
     const seedI = getSeed(ratings[i]!, ratings, i);
-    const midRank = Math.sqrt(seedI * contestants[i]!.rank);
+    const effRank = contestants[i]!.rank + rankCount.get(contestants[i]!.rank)! - 1;
+    const midRank = Math.sqrt(seedI * effRank);
     const r = searchRating(midRank, ratings, i);
     deltas[i] = Math.trunc((r - ratings[i]!) / 2);
   }
@@ -59,7 +65,7 @@ export function computeRatingChanges(contestants: Contestant[]): RatingChange[] 
   // 修正②：高分组总变化下调不超过约 10 分
   {
     const order = [...Array(n).keys()].sort((a, b) => ratings[b]! - ratings[a]!);
-    const s = Math.min(n, Math.round(4 * Math.sqrt(n)));
+    const s = Math.min(n, 4 * Math.round(Math.sqrt(n)));
     let sum = 0;
     for (let t = 0; t < s; t++) sum += deltas[order[t]!]!;
     const inc = Math.min(Math.max(Math.trunc(-sum / s), -10), 0);

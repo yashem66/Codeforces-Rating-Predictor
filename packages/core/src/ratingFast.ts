@@ -35,11 +35,16 @@ export function computeRatingChangesFast(contestants: Contestant[]): RatingChang
   // S(Dlo + s) = 1 + conv[s + (L-1)]
   const S = (rating: number): number => 1 + conv[rating - Dlo + (L - 1)]!;
 
+  // 并列名次取该并列组的“最差（最大）位置”，与 CF/TLE 一致。
+  const rankCount = new Map<number, number>();
+  for (const c of contestants) rankCount.set(c.rank, (rankCount.get(c.rank) ?? 0) + 1);
+
   const deltas = new Array<number>(n);
   for (let i = 0; i < n; i++) {
     const ri = contestants[i]!.rating;
     const seedI = S(ri) - 0.5; // 排除自身（g(0)=0.5）
-    const midRank = Math.sqrt(seedI * contestants[i]!.rank);
+    const effRank = contestants[i]!.rank + rankCount.get(contestants[i]!.rank)! - 1;
+    const midRank = Math.sqrt(seedI * effRank);
     let lo = 1;
     let hi = 8000;
     while (hi - lo > 1) {
@@ -61,7 +66,7 @@ export function computeRatingChangesFast(contestants: Contestant[]): RatingChang
     const order = [...Array(n).keys()].sort(
       (a, b) => contestants[b]!.rating - contestants[a]!.rating,
     );
-    const s = Math.min(n, Math.round(4 * Math.sqrt(n)));
+    const s = Math.min(n, 4 * Math.round(Math.sqrt(n)));
     let sum = 0;
     for (let t = 0; t < s; t++) sum += deltas[order[t]!]!;
     const inc = Math.min(Math.max(Math.trunc(-sum / s), -10), 0);

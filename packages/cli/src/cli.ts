@@ -1,13 +1,20 @@
 #!/usr/bin/env tsx
 import { writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { computeRatingChanges, computeRatingChangesFast } from '@crp/core';
+import {
+  computeRatingChanges,
+  computeRatingChangesFast,
+  displayToCalc,
+  calcToDisplay,
+  type Contestant,
+} from '@crp/core';
 import { CodeforcesApi } from './api.js';
 import { JsonCache } from './cache.js';
 import { SAMPLE_CONTEST_IDS } from './dataset.js';
 import { validateContest, type ContestReport } from './validate.js';
 import { aggregate, formatReport } from './report.js';
 import { listFinishedContests } from './contests.js';
+import { ParticipationIndex } from './participationIndex.js';
 import { runValidateAll } from './full.js';
 
 const DATA_DIR = join(process.cwd(), 'data', 'cache');
@@ -102,9 +109,90 @@ async function main(): Promise<void> {
       );
       break;
     }
+    case 'diag': {
+      const id = Number(target);
+      if (!Number.isInteger(id) || id <= 0) throw new Error(`invalid contest id: ${target}`);
+
+      // 用缓存重建全局参赛索引（全部命中缓存，较快）。
+      const contests = await listFinishedContests(api, INDEX_FROM, NOW_SEC);
+      const index = new ParticipationIndex();
+      for (const meta of contests) {
+        let rows;
+        try {
+          rows = await api.getRatingChanges(meta.id);
+        } catch {
+          continue;
+        }
+        if (rows.length > 0) index.addContest(rows);
+      }
+      index.finalize();
+
+      const rows = await api.getRatingChanges(id);
+      const contestTime = rows[0]!.ratingUpdateTimeSeconds;
+      const naive = process.env.CRP_NAIVE === '1';
+      const fn = naive ? computeRatingChanges : computeRatingChangesFast;
+
+      const contestants: Contestant[] = rows.map((r) => {
+        const k = index.priorCount(r.handle, contestTime);
+        return { party: r.handle, rank: r.rank, rating: displayToCalc(r.oldRating, k) };
+      });
+      const changes = fn(contestants);
+      const byParty = new Map(changes.map((c) => [c.party, c]));
+
+      // 按 oldRating 分档统计 signed/abs 误差与精确率。
+      const bands: { label: string; lo: number; hi: number }[] = [
+        { label: '   <800', lo: -10000, hi: 799 },
+        { label: '800-1199', lo: 800, hi: 1199 },
+        { label: '1200-1599', lo: 1200, hi: 1599 },
+        { label: '1600-1899', lo: 1600, hi: 1899 },
+        { label: '1900-2099', lo: 1900, hi: 2099 },
+        { label: '2100-2399', lo: 2100, hi: 2399 },
+        { label: '  >=2400', lo: 2400, hi: 100000 },
+      ];
+      const stats = bands.map((b) => ({ ...b, n: 0, exact: 0, sumSigned: 0, sumAbs: 0 }));
+      const kStats = { newN: 0, newExact: 0, matureN: 0, matureExact: 0 };
+
+      for (const r of rows) {
+        const k = index.priorCount(r.handle, contestTime);
+        const ch = byParty.get(r.handle)!;
+        const predDisplay = calcToDisplay(ch.newRating, k + 1);
+        const signed = predDisplay - r.newRating;
+        for (const s of stats) {
+          if (r.oldRating >= s.lo && r.oldRating <= s.hi) {
+            s.n++;
+            s.sumSigned += signed;
+            s.sumAbs += Math.abs(signed);
+            if (signed === 0) s.exact++;
+            break;
+          }
+        }
+        if (k < 6) {
+          kStats.newN++;
+          if (signed === 0) kStats.newExact++;
+        } else {
+          kStats.matureN++;
+          if (signed === 0) kStats.matureExact++;
+        }
+      }
+
+      process.stdout.write(`diag contest ${id} (n=${rows.length}, algo=${naive ? 'naive' : 'fast'})\n`);
+      process.stdout.write(`band        n     exact%   meanSigned  meanAbs\n`);
+      for (const s of stats) {
+        if (s.n === 0) continue;
+        process.stdout.write(
+          `${s.label}  ${String(s.n).padStart(6)}  ${((s.exact / s.n) * 100).toFixed(1).padStart(6)}  ` +
+            `${(s.sumSigned / s.n).toFixed(2).padStart(10)}  ${(s.sumAbs / s.n).toFixed(2).padStart(7)}\n`,
+        );
+      }
+      process.stdout.write(
+        `k<6:    n=${kStats.newN} exact=${kStats.newN ? ((kStats.newExact / kStats.newN) * 100).toFixed(1) : '-'}%\n` +
+          `k>=6:   n=${kStats.matureN} exact=${kStats.matureN ? ((kStats.matureExact / kStats.matureN) * 100).toFixed(1) : '-'}%\n`,
+      );
+      break;
+    }
     default:
       process.stdout.write(
-        'usage: crp <fetch|validate|fetch-all|validate-all> [contestId|sample]\n',
+        'usage: crp <fetch|validate|fetch-all|validate-all|diag> [contestId|sample]\n',
       );
       process.exitCode = 1;
   }
