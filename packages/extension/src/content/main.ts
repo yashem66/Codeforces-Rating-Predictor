@@ -55,8 +55,8 @@ export async function runContentScript(url: string, doc: Document = document): P
           }
           rows = parseStandingsFromDOM(tables[0]!);
 
-          // 拉取剩余分页（每批 10 页并发，最多 200 页 = ~4000 人）
-          const MAX_PAGES = 200;
+          // 拉取剩余分页（每批 10 页并发，最多 800 页 = ~16000 人）
+          const MAX_PAGES = 800;
           const BATCH = 10;
           const totalPages = Math.min(extractTotalPages(doc), MAX_PAGES);
           if (totalPages > 1) {
