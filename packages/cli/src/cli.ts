@@ -259,7 +259,7 @@ async function main(): Promise<void> {
       const kEffMap = new Map<string, number>();
       let done = 0;
       for (const r of rows) {
-        let hist: Awaited<ReturnType<CodeforcesApi['getUserRating']>> = [];
+        let hist: Awaited<ReturnType<CodeforcesApi['getUserRating']>>;
         try {
           hist = await api.getUserRating(r.handle);
         } catch {
