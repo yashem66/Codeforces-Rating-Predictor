@@ -22,6 +22,7 @@ export function formatReport(contestId: number, r: ContestReport): string {
 export interface AggregateResult {
   totalN: number;
   weightedExactRate: number;
+  weightedMeanAbsError: number;
   maxAbsError: number;
 }
 
@@ -30,15 +31,18 @@ export function aggregate(
 ): AggregateResult {
   let totalN = 0;
   let exactSum = 0;
+  let absSum = 0;
   let maxAbsError = 0;
   for (const { report } of items) {
     totalN += report.n;
     exactSum += report.exactRate * report.n;
+    absSum += report.meanAbsError * report.n;
     maxAbsError = Math.max(maxAbsError, report.maxAbsError);
   }
   return {
     totalN,
     weightedExactRate: totalN === 0 ? 1 : exactSum / totalN,
+    weightedMeanAbsError: totalN === 0 ? 0 : absSum / totalN,
     maxAbsError,
   };
 }

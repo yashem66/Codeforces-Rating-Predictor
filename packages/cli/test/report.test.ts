@@ -31,4 +31,12 @@ describe('aggregate', () => {
     expect(agg.totalN).toBe(200);
     expect(agg.weightedExactRate).toBeCloseTo(0.5, 12);
   });
+
+  it('按人数加权汇总 meanAbsError', () => {
+    const agg = aggregate([
+      { contestId: 1, report: report({ n: 100, meanAbsError: 2 }) },
+      { contestId: 2, report: report({ n: 300, meanAbsError: 6 }) },
+    ]);
+    expect(agg.weightedMeanAbsError).toBeCloseTo((2 * 100 + 6 * 300) / 400, 12);
+  });
 });

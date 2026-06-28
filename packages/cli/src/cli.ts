@@ -107,6 +107,7 @@ async function main(): Promise<void> {
       process.stdout.write(
         `\nFULL AGGREGATE: contests=${result.validated.length} totalN=${agg.totalN} ` +
           `weightedExactRate=${(agg.weightedExactRate * 100).toFixed(3)}% ` +
+          `weightedMeanAbsError=${agg.weightedMeanAbsError.toFixed(3)} ` +
           `maxAbsError=${agg.maxAbsError}\nreport: ${outPath}\n`,
       );
       break;
