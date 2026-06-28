@@ -1,17 +1,9 @@
+import { extractHandle } from './standings.js';
 import type { RowData } from '../types.js';
 
 const INJECTED_ATTR = 'data-crp-injected';
 const RATING_ATTR = 'data-crp-rating';
 const DELTA_ATTR = 'data-crp-delta';
-
-/** 从表格行中提取选手 handle（通过 profile 链接） */
-function extractHandleFromRow(row: HTMLTableRowElement): string | null {
-  const link = row.querySelector('a[href*="/profile/"]') as HTMLAnchorElement | null;
-  if (!link) return null;
-  const href = link.getAttribute('href') ?? '';
-  const match = href.match(/\/profile\/([^/?#]+)/);
-  return match ? match[1] ?? null : null;
-}
 
 /** 判断是否是表头行 */
 function isHeaderRow(row: HTMLTableRowElement): boolean {
@@ -42,7 +34,44 @@ function colorClass(delta: number): string {
 }
 
 /**
+ * 找出 standings 表格中「选手列」的索引。
+ * 优先在表头中匹配 "who"/"участник"/"handle"/"="；
+ * 若表头无法识别，则在第一个数据行中找含 profile 链接的单元格；
+ * 默认返回 1（CF 典型布局：# 在 0，选手名在 1）。
+ */
+function findContestantColIndex(table: HTMLTableElement): number {
+  // 1. 表头行：按文字匹配选手列（避免误匹配 "#" 导致插入到排名列后）
+  for (const row of Array.from(table.rows)) {
+    if (!isHeaderRow(row)) continue;
+    const cells = Array.from(row.cells);
+    for (let i = 0; i < cells.length; i++) {
+      const text = cells[i]!.textContent?.trim().toLowerCase() ?? '';
+      if (text === 'who' || text === 'участник' || text === 'handle' || text === '=') {
+        return i;
+      }
+    }
+    break; // 只检查第一个表头行
+  }
+
+  // 2. 第一个数据行：找含 profile 链接的单元格
+  for (const row of Array.from(table.rows)) {
+    if (isHeaderRow(row) || isSeparatorRow(row)) continue;
+    const cells = Array.from(row.cells);
+    for (let i = 0; i < cells.length; i++) {
+      if (cells[i]!.querySelector('a[href*="/profile/"]')) {
+        return i;
+      }
+    }
+    break; // 只检查第一个数据行
+  }
+
+  return 1; // 默认值：第二列
+}
+
+/**
  * 幂等地向 standings 表格注入 Rating + Pred Δ 两列。
+ * 两列均插入在选手列（"Who" / "=" / contestant-cell）之后，
+ * 保证表头与数据行列对齐。
  * @param table 目标表格
  * @param data  handle → { rating?, delta? }
  * @param opts  { showRating, showDelta }
@@ -62,22 +91,13 @@ export function injectColumns(
     }
   }
 
+  const contestantColIdx = findContestantColIndex(table);
   const rows = Array.from(table.rows);
 
   for (const row of rows) {
     if (isHeaderRow(row)) {
-      // 插入表头 th（找"选手名"列后，这里简单插在第 2 列之后）
       const cells = Array.from(row.cells);
-      // 找 th 中包含 "=" 或 "Who"/"Handle" 字样的列，若无则插在末尾
-      let insertAfterIdx = cells.length - 1;
-      for (let i = 0; i < cells.length; i++) {
-        const text = (cells[i] as HTMLTableCellElement).textContent?.trim().toLowerCase() ?? '';
-        if (text === '=' || text === 'who' || text === 'handle' || text === '#') {
-          insertAfterIdx = i;
-          break;
-        }
-      }
-      const refCell = cells[insertAfterIdx] as HTMLTableCellElement;
+      const refCell = cells[Math.min(contestantColIdx, cells.length - 1)] as HTMLTableCellElement;
 
       if (opts.showRating) {
         const th = document.createElement('th');
@@ -102,28 +122,39 @@ export function injectColumns(
 
     if (isSeparatorRow(row)) {
       // 分隔行：各列加空 td 占位（保持列对齐）
+      const cells = Array.from(row.cells);
+      const refCell = cells[Math.min(contestantColIdx, cells.length - 1)] as HTMLTableCellElement;
+
       if (opts.showRating) {
         const td = document.createElement('td');
         td.setAttribute(RATING_ATTR, '1');
-        row.appendChild(td);
+        refCell.insertAdjacentElement('afterend', td);
       }
       if (opts.showDelta) {
         const td = document.createElement('td');
         td.setAttribute(DELTA_ATTR, '1');
-        row.appendChild(td);
+        const ratingTd = row.querySelector(`td[${RATING_ATTR}]`);
+        if (ratingTd) {
+          ratingTd.insertAdjacentElement('afterend', td);
+        } else {
+          refCell.insertAdjacentElement('afterend', td);
+        }
       }
       continue;
     }
 
-    const handle = extractHandleFromRow(row);
+    // 数据行：插入在选手列之后（与表头列对齐）
+    const handle = extractHandle(row);
     const rowData = handle ? data.get(handle) : undefined;
+    const cells = Array.from(row.cells);
+    const refCell = cells[Math.min(contestantColIdx, cells.length - 1)] as HTMLTableCellElement;
 
     if (opts.showRating) {
       const td = document.createElement('td');
       td.setAttribute(RATING_ATTR, '1');
       td.textContent =
         rowData?.rating !== undefined ? String(rowData.rating) : '—';
-      row.appendChild(td);
+      refCell.insertAdjacentElement('afterend', td);
     }
 
     if (opts.showDelta) {
@@ -135,7 +166,12 @@ export function injectColumns(
       } else {
         td.textContent = '—';
       }
-      row.appendChild(td);
+      const ratingTd = row.querySelector(`td[${RATING_ATTR}]`);
+      if (ratingTd) {
+        ratingTd.insertAdjacentElement('afterend', td);
+      } else {
+        refCell.insertAdjacentElement('afterend', td);
+      }
     }
   }
 

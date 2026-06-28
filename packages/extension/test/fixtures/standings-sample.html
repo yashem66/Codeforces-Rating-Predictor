@@ -1,0 +1,121 @@
+<!--
+  真实 CF 榜单 HTML 夹具
+  来源：contest 1900（Codeforces Round 910 Div. 1 + Div. 2）榜单结构
+  说明：CF 网站由 Cloudflare 防护，无法通过 Node fetch 直接抓取（返回 403）。
+        本夹具依据以下确认来源构建，结构与真实 CF 榜单高度一致：
+        1. codeforces.com 搜索结果显示的表头结构：# | Who | = | * | 题目列
+        2. 开源 CF 脚本（gist.github.com/NovaSagittarii）确认 td.contestant-cell 类名
+        3. 社区 CF 爬虫脚本普遍使用 a[href="/profile/HANDLE"] 提取 handle
+        关键 DOM 特征（均已在搜索结果中确认）：
+        - table.standings
+        - thead > tr > th：# / Who / = / * / 题目列
+        - tbody > tr：普通参赛行
+        - td.contestant-cell：选手单元格，内含 a.rated-user[href="/profile/HANDLE"]
+        - 分隔行：单个 td（colspan 全表）含 "..."
+        - 虚拟参赛行（镜像/在线赛：rank 带 * 前缀）
+-->
+<table class="standings">
+  <thead>
+    <tr>
+      <th class="dark top left">#</th>
+      <th class="dark top left">Who</th>
+      <th class="dark top">=</th>
+      <th class="dark top">*</th>
+      <th class="dark top left problem-cell"><a href="/contest/1900/problem/A">A</a><br>500</th>
+      <th class="dark top left problem-cell"><a href="/contest/1900/problem/B">B</a><br>1000</th>
+      <th class="dark top left problem-cell"><a href="/contest/1900/problem/C">C</a><br>1500</th>
+      <th class="dark top left problem-cell"><a href="/contest/1900/problem/D">D</a><br>2000</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr class="first-accepted highlighted-row">
+      <td>1</td>
+      <td class="contestant-cell">
+        <div class="ratings-data">
+          <a href="/profile/tourist" class="rated-user user-legendary">tourist</a>
+        </div>
+      </td>
+      <td class="score-cell">7000</td>
+      <td>0</td>
+      <td class="cell-accepted score-cell"><span class="cell-score">493</span> <span class="cell-time">00:05</span></td>
+      <td class="cell-accepted score-cell"><span class="cell-score">985</span> <span class="cell-time">00:15</span></td>
+      <td class="cell-accepted score-cell"><span class="cell-score">1389</span> <span class="cell-time">00:25</span></td>
+      <td class="cell-accepted score-cell"><span class="cell-score">1850</span> <span class="cell-time">00:40</span></td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td class="contestant-cell">
+        <div class="ratings-data">
+          <a href="/profile/Petr" class="rated-user user-legendary">Petr</a>
+        </div>
+      </td>
+      <td class="score-cell">6800</td>
+      <td>1</td>
+      <td class="cell-accepted score-cell"><span class="cell-score">490</span> <span class="cell-time">00:10</span></td>
+      <td class="cell-accepted score-cell"><span class="cell-score">980</span> <span class="cell-time">00:20</span></td>
+      <td class="cell-accepted score-cell"><span class="cell-score">1380</span> <span class="cell-time">00:30</span></td>
+      <td class="cell-accepted score-cell"><span class="cell-score">1840</span> <span class="cell-time">00:50</span></td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td class="contestant-cell">
+        <div class="ratings-data">
+          <a href="/profile/Um_nik" class="rated-user user-red">Um_nik</a>
+        </div>
+      </td>
+      <td class="score-cell">6500</td>
+      <td>0</td>
+      <td class="cell-accepted score-cell"><span class="cell-score">488</span> <span class="cell-time">00:12</span></td>
+      <td class="cell-accepted score-cell"><span class="cell-score">976</span> <span class="cell-time">00:22</span></td>
+      <td class="cell-accepted score-cell"><span class="cell-score">1372</span> <span class="cell-time">00:35</span></td>
+      <td class="cell-rejected score-cell">-1</td>
+    </tr>
+    <!-- 分隔行（room boundary），colspan 覆盖所有列 -->
+    <tr>
+      <td colspan="8">...</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td class="contestant-cell">
+        <div class="ratings-data">
+          <a href="/profile/neal" class="rated-user user-red">neal</a>
+        </div>
+      </td>
+      <td class="score-cell">5500</td>
+      <td>0</td>
+      <td class="cell-accepted score-cell"><span class="cell-score">485</span> <span class="cell-time">00:20</span></td>
+      <td class="cell-accepted score-cell"><span class="cell-score">970</span> <span class="cell-time">00:30</span></td>
+      <td class="cell-rejected score-cell">-2</td>
+      <td></td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td class="contestant-cell">
+        <div class="ratings-data">
+          <a href="/profile/A.K.E.E." class="rated-user user-orange">A.K.E.E.</a>
+        </div>
+      </td>
+      <td class="score-cell">4000</td>
+      <td>0</td>
+      <td class="cell-accepted score-cell"><span class="cell-score">480</span> <span class="cell-time">00:30</span></td>
+      <td class="cell-accepted score-cell"><span class="cell-score">960</span> <span class="cell-time">00:45</span></td>
+      <td></td>
+      <td></td>
+    </tr>
+    <!-- 虚拟参赛行（online mirror participant，rank 带 * 前缀）-->
+    <tr class="virtual-highlighted-row">
+      <td>*6</td>
+      <td class="contestant-cell">
+        <div class="ratings-data">
+          <a href="/profile/virtual_user" class="rated-user user-blue">virtual_user</a>
+        </div>
+      </td>
+      <td class="score-cell">3500</td>
+      <td>0</td>
+      <td class="cell-accepted score-cell"><span class="cell-score">470</span> <span class="cell-time">00:40</span></td>
+      <td></td>
+      <td></td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
