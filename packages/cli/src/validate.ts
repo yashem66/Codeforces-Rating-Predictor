@@ -35,9 +35,12 @@ export function validateContest(
 ): ContestReport {
   // 剔除被 CF 行政清零的异常条目（newRating==0：取消资格/作弊清零），它们非正常评分变化。
   const rows = allRows.filter((r) => r.newRating !== 0);
+  // Carrot 风格对照：直接用显示分（k==0 用 1400），输出不做 boost 换算。
+  const carrot = process.env.CRP_CARROT === '1';
   const contestants: Contestant[] = rows.map((r) => {
     const k = priorCounts.get(r.handle) ?? 6; // 默认按成熟用户处理（偏移 0）
-    return { party: r.handle, rank: r.rank, rating: displayToCalc(r.oldRating, k) };
+    const rating = carrot ? (k === 0 ? 1400 : r.oldRating) : displayToCalc(r.oldRating, k);
+    return { party: r.handle, rank: r.rank, rating };
   });
 
   const changes = ratingFn(contestants);
@@ -47,7 +50,7 @@ export function validateContest(
   for (const r of rows) {
     const k = priorCounts.get(r.handle) ?? 6;
     const change = byParty.get(r.handle)!;
-    const predictedDisplay = calcToDisplay(change.newRating, k + 1);
+    const predictedDisplay = carrot ? r.oldRating + change.delta : calcToDisplay(change.newRating, k + 1);
     const absError = Math.abs(predictedDisplay - r.newRating);
     mismatches.push({
       handle: r.handle,

@@ -259,13 +259,22 @@ async function main(): Promise<void> {
       const kEffMap = new Map<string, number>();
       let done = 0;
       for (const r of rows) {
-        const hist = await api.getUserRating(r.handle);
+        let hist: Awaited<ReturnType<CodeforcesApi['getUserRating']>> = [];
+        try {
+          hist = await api.getUserRating(r.handle);
+        } catch {
+          kEffMap.set(r.handle, 6); // 取不到则按成熟处理
+          if (++done % 100 === 0) process.stdout.write(`  fetched ${done}/${rows.length}\n`);
+          continue;
+        }
         const before = hist.filter((h) => h.ratingUpdateTimeSeconds < contestTime);
         const trueK = before.length;
         const newSystem =
-          hist.length > 0 ? hist[0]!.oldRating === 0 && hist[0]!.ratingUpdateTimeSeconds >= NEW_SYSTEM : false;
+          hist.length > 0
+            ? hist[0]!.oldRating === 0 && hist[0]!.ratingUpdateTimeSeconds >= NEW_SYSTEM
+            : false;
         kEffMap.set(r.handle, newSystem ? trueK : 6);
-        if (++done % 500 === 0) process.stdout.write(`  fetched ${done}/${rows.length}\n`);
+        if (++done % 100 === 0) process.stdout.write(`  fetched ${done}/${rows.length}\n`);
       }
 
       const validRows = rows.filter((r) => r.newRating !== 0);
@@ -315,30 +324,27 @@ async function main(): Promise<void> {
 
       const rows = await api.getRatingChanges(id);
       const contestTime = rows[0]!.ratingUpdateTimeSeconds;
-      // 抽样 ~40 个用户，用 user.rating 取真实 k 对比索引 k
-      const sample = Math.max(1, Math.floor(rows.length / 40));
+      // 抽样 ~50 个用户，对比“索引 effectiveK” vs “user.rating 真值 effectiveK”
+      const sample = Math.max(1, Math.floor(rows.length / 50));
       let mismatches = 0;
       let checked = 0;
-      let preNew = 0;
       for (let i = 0; i < rows.length; i += sample) {
         const r = rows[i]!;
         const hist = await api.getUserRating(r.handle);
         const trueK = hist.filter((h) => h.ratingUpdateTimeSeconds < contestTime).length;
-        const idxK = index.priorCount(r.handle, contestTime);
-        const firstTime = hist.length > 0 ? hist[0]!.ratingUpdateTimeSeconds : contestTime;
-        const isPreNew = firstTime < NEW_SYSTEM;
-        if (isPreNew) preNew++;
+        const trueNew =
+          hist.length > 0 && hist[0]!.oldRating === 0 && hist[0]!.ratingUpdateTimeSeconds >= NEW_SYSTEM;
+        const trueEffK = trueNew ? trueK : 6;
+        const idxEffK = index.effectiveK(r.handle, contestTime);
         checked++;
-        if (trueK !== idxK || (isPreNew && idxK < 6)) {
+        if (idxEffK !== trueEffK) {
           mismatches++;
           process.stdout.write(
-            `  ${r.handle}: idxK=${idxK} trueK=${trueK} firstBefore2020-05=${isPreNew} old=${r.oldRating}\n`,
+            `  ${r.handle}: idxEffK=${idxEffK} trueEffK=${trueEffK} (trueK=${trueK} trueNew=${trueNew}) old=${r.oldRating}\n`,
           );
         }
       }
-      process.stdout.write(
-        `checkk ${id}: checked=${checked} mismatches=${mismatches} preNewSystem=${preNew}\n`,
-      );
+      process.stdout.write(`checkk ${id}: checked=${checked} effKmismatches=${mismatches}\n`);
       break;
     }
     default:
