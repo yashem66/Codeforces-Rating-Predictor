@@ -1,8 +1,8 @@
-import { getRatingChanges, getStandings, getUserInfos } from '../lib/cfApi.js';
+import { getRatingChanges, getStandings, getUserInfos, StandingsUnavailableError } from '../lib/cfApi.js';
 import { finalDeltas, predictDeltas } from '../lib/predict.js';
 import { getSettings } from '../lib/settings.js';
 import { injectColumns } from './inject.js';
-import { parseContestId, findStandingsTables } from './standings.js';
+import { parseContestId, findStandingsTables, parseStandingsFromDOM, extractTotalPages } from './standings.js';
 import type { RowData } from '../types.js';
 
 /**
@@ -41,7 +41,59 @@ export async function runContentScript(url: string, doc: Document = document): P
       }
     } else {
       // 进行中 / 未结算：预测
-      const rows = await getStandings(contestId);
+      let rows;
+      try {
+        rows = await getStandings(contestId);
+      } catch (e) {
+        if (e instanceof StandingsUnavailableError) {
+          // API 不可访问时降级：从当前页面 DOM + 分页 HTML 解析完整榜单
+          console.info('[CRP] Standings API unavailable, falling back to HTML page scraping:', e.message);
+          const tables = findStandingsTables(doc);
+          if (tables.length === 0) {
+            console.warn('[CRP] No standings table found in DOM, skipping injection');
+            return;
+          }
+          rows = parseStandingsFromDOM(tables[0]!);
+
+          // 拉取剩余分页（每批 10 页并发，最多 200 页 = ~4000 人）
+          const MAX_PAGES = 200;
+          const BATCH = 10;
+          const totalPages = Math.min(extractTotalPages(doc), MAX_PAGES);
+          if (totalPages > 1) {
+            console.log(`[CRP] Fetching ${totalPages - 1} more standings pages…`);
+            for (let start = 2; start <= totalPages; start += BATCH) {
+              const end = Math.min(start + BATCH - 1, totalPages);
+              const pageResults = await Promise.all(
+                Array.from({ length: end - start + 1 }, async (_, i) => {
+                  const page = start + i;
+                  try {
+                    const res = await fetch(
+                      `/contest/${contestId}/standings/page/${page}`,
+                      { credentials: 'include' },
+                    );
+                    if (!res.ok) return [] as typeof rows;
+                    const html = await res.text();
+                    const pageDom = new DOMParser().parseFromString(html, 'text/html');
+                    const pt = findStandingsTables(pageDom);
+                    return pt.length > 0 ? parseStandingsFromDOM(pt[0]!) : ([] as typeof rows);
+                  } catch {
+                    return [] as typeof rows;
+                  }
+                }),
+              );
+              let anyEmpty = false;
+              for (const pageRows of pageResults) {
+                if (pageRows.length === 0) { anyEmpty = true; break; }
+                rows.push(...pageRows);
+              }
+              if (anyEmpty) break;
+            }
+          }
+          console.log('[CRP] DOM standings rows =', rows.length);
+        } else {
+          throw e;
+        }
+      }
       const handles = rows.map((r) => r.handle);
       const userInfos = await getUserInfos(handles);
       const ratingsMap = new Map<string, number | undefined>();

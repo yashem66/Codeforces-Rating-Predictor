@@ -7,7 +7,9 @@ const CF_API = 'https://codeforces.com/api';
  * 生产代码使用全局 fetch；测试中可修改 _api.fetchImpl。
  */
 export const _api = {
-  fetchImpl: (url: string): Promise<Response> => fetch(url),
+  // credentials: 'include' 确保内容脚本请求携带 CF 登录 Cookie，
+  // 否则 contest.standings 等需要认证的端点会返回 400。
+  fetchImpl: (url: string): Promise<Response> => fetch(url, { credentials: 'include' }),
 };
 
 // 内存缓存（测试 & 生产共用）
@@ -62,7 +64,7 @@ async function setCached<T>(key: string, value: T, ttlMs: number): Promise<void>
   await chromeSet(key, entry);
 }
 
-/** 判断 API 失败是否属于"空结果"类型（比赛未计分、未找到等） */
+/** 判断 API 失败是否属于"空结果/无权限"类型（比赛未计分、进行中、无访问权限等） */
 function isEmptyResultError(comment: string): boolean {
   const lower = comment.toLowerCase();
   return (
@@ -70,7 +72,13 @@ function isEmptyResultError(comment: string): boolean {
     lower.includes('unrated') ||
     lower.includes('not found') ||
     lower.includes('no such contest') ||
-    lower.includes('rating changes are unavailable')
+    lower.includes('rating changes are unavailable') ||
+    lower.includes("doesn't exist") ||
+    lower.includes('not allowed') ||
+    lower.includes('has not started') ||
+    lower.includes('contest is running') ||
+    lower.includes('participate') ||
+    lower.includes('denied')
   );
 }
 
@@ -81,6 +89,18 @@ async function cfFetch<T>(endpoint: string, params: Record<string, string>): Pro
   }
   const res = await _api.fetchImpl(url.toString());
   if (!res.ok) {
+    // 尝试解析 JSON body：CF API 在 400 时仍可能返回含 comment 的 JSON
+    // 例如比赛进行中时 contest.ratingChanges 会返回 HTTP 400 + FAILED body
+    try {
+      const errJson = (await res.json()) as { status?: string; comment?: string };
+      const comment = errJson.comment ?? '';
+      if (isEmptyResultError(comment)) {
+        throw new EmptyResultError(comment);
+      }
+    } catch (parseErr) {
+      if (parseErr instanceof EmptyResultError) throw parseErr;
+      // JSON 解析失败则回退到通用 HTTP 错误
+    }
     throw new Error(`HTTP ${res.status} from ${url}`);
   }
   const json = (await res.json()) as { status: string; result?: T; comment?: string };
@@ -99,6 +119,14 @@ export class EmptyResultError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'EmptyResultError';
+  }
+}
+
+/** 榜单不可访问（比赛进行中、需登录、无权限等） */
+export class StandingsUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StandingsUnavailableError';
   }
 }
 
@@ -126,23 +154,38 @@ export async function getStandings(contestId: number): Promise<StandingsRow[]> {
   interface StandingsResult {
     rows: RawRow[];
   }
-  const result = await cfFetch<StandingsResult>('contest.standings', {
-    contestId: String(contestId),
-    showUnofficial: 'false',
-  });
-  const rows: StandingsRow[] = [];
-  for (const row of result.rows) {
-    // 跳过团队赛（多成员）
-    if (row.party.members.length !== 1) continue;
-    const handle = row.party.members[0]!.handle;
-    rows.push({ handle, rank: row.rank, points: row.points, penalty: row.penalty });
+  try {
+    const result = await cfFetch<StandingsResult>('contest.standings', {
+      contestId: String(contestId),
+      showUnofficial: 'false',
+      from: '1',
+      count: '10000',
+    });
+    const rows: StandingsRow[] = [];
+    for (const row of result.rows) {
+      // 跳过团队赛（多成员）
+      if (row.party.members.length !== 1) continue;
+      const handle = row.party.members[0]!.handle;
+      rows.push({ handle, rank: row.rank, points: row.points, penalty: row.penalty });
+    }
+    return rows;
+  } catch (e) {
+    if (e instanceof EmptyResultError) {
+      throw new StandingsUnavailableError(e.message);
+    }
+    // HTTP 400/403 等均视为榜单暂不可用
+    if (e instanceof Error && /HTTP (400|403)/.test(e.message)) {
+      throw new StandingsUnavailableError(e.message);
+    }
+    throw e;
   }
-  return rows;
 }
 
-/** 分批获取用户 rating 信息（每批 ≤ 10000） */
+/** 分批获取用户 rating 信息（每批 ≤ 300，5 批并发，避免 URL 过长） */
 export async function getUserInfos(handles: string[]): Promise<UserInfo[]> {
-  const BATCH = 10000;
+  // 300 handles × 平均 12 字符 ≈ 3600 字符，安全通过 nginx 8KB URL 限制
+  const BATCH = 300;
+  const CONCURRENCY = 5;
   const results: UserInfo[] = [];
   const toFetch: string[] = [];
 
@@ -151,7 +194,6 @@ export async function getUserInfos(handles: string[]): Promise<UserInfo[]> {
     const cacheKey = `userRating:${handle}`;
     const cached = await getCached<number | null>(cacheKey);
     if (cached !== undefined) {
-      // exactOptionalPropertyTypes: 只在有值时包含 rating 属性
       const info: UserInfo = cached !== null ? { handle, rating: cached } : { handle };
       results.push(info);
     } else {
@@ -159,20 +201,31 @@ export async function getUserInfos(handles: string[]): Promise<UserInfo[]> {
     }
   }
 
-  // 分批请求未缓存的
+  interface RawUser {
+    handle: string;
+    rating?: number;
+  }
+
+  // 切分成 BATCH 大小的块
+  const chunks: string[][] = [];
   for (let i = 0; i < toFetch.length; i += BATCH) {
-    const batch = toFetch.slice(i, i + BATCH);
-    interface RawUser {
-      handle: string;
-      rating?: number;
-    }
-    const batchResult = await cfFetch<RawUser[]>('user.info', {
-      handles: batch.join(';'),
-    });
-    for (const u of batchResult) {
-      const info: UserInfo = u.rating !== undefined ? { handle: u.handle, rating: u.rating } : { handle: u.handle };
-      results.push(info);
-      await setCached<number | null>(`userRating:${u.handle}`, u.rating ?? null, RATINGS_TTL_MS);
+    chunks.push(toFetch.slice(i, i + BATCH));
+  }
+
+  // 按 CONCURRENCY 并发执行，每轮同时发 CONCURRENCY 个请求
+  for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+    const concurrentChunks = chunks.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.all(
+      concurrentChunks.map((chunk) =>
+        cfFetch<RawUser[]>('user.info', { handles: chunk.join(';') }),
+      ),
+    );
+    for (const batchResult of batchResults) {
+      for (const u of batchResult) {
+        const info: UserInfo = u.rating !== undefined ? { handle: u.handle, rating: u.rating } : { handle: u.handle };
+        results.push(info);
+        await setCached<number | null>(`userRating:${u.handle}`, u.rating ?? null, RATINGS_TTL_MS);
+      }
     }
   }
 
