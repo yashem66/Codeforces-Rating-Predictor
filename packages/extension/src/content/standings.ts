@@ -35,18 +35,41 @@ export function extractRank(row: HTMLTableRowElement): number | null {
   return isNaN(n) ? null : n;
 }
 
+/**
+ * 判断表格行是否为 unofficial 选手（virtual / out of competition）。
+ * 与 API `showUnofficial=false` 语义对齐，避免 DOM 降级时污染 rating 预测。
+ */
+export function isUnofficialRow(row: HTMLTableRowElement): boolean {
+  if (row.classList.contains('virtual-highlighted-row')) return true;
+
+  const rankText = row.cells[0]?.textContent?.trim() ?? '';
+  if (rankText.startsWith('*')) return true;
+
+  const contestantCell = row.querySelector('.contestant-cell') ?? row.cells[1];
+  if (contestantCell) {
+    const html = contestantCell.innerHTML;
+    const text = contestantCell.textContent ?? '';
+    // 已结束赛 virtual：Who 列 profile 链接前有 *（rank 列为空）
+    if (/\*\s*<a\s+[^>]*href="\/profile\//i.test(html)) return true;
+    if (/out of competition/i.test(text)) return true;
+  }
+
+  return false;
+}
+
 /** 直接从页面 DOM 解析榜单（用于比赛进行中 API 不可访问时的降级） */
 export function parseStandingsFromDOM(table: HTMLTableElement): StandingsRow[] {
   const rows: StandingsRow[] = [];
-  let autoRank = 1;
   for (const row of Array.from(table.rows)) {
     // 跳过表头行（含 <th>）
     if (row.querySelectorAll('th').length > 0) continue;
+    if (isUnofficialRow(row)) continue;
     const handle = extractHandle(row);
     if (!handle) continue;
-    const rank = extractRank(row) ?? autoRank;
+    const rank = extractRank(row);
+    // 官方选手 rank 列必有数字；无 rank 的行跳过（避免误用 autoRank 污染预测）
+    if (rank === null) continue;
     rows.push({ handle, rank, points: 0, penalty: 0 });
-    autoRank = rank + 1;
   }
   return rows;
 }

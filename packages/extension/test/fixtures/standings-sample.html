@@ -12,7 +12,8 @@
         - tbody > tr：普通参赛行
         - td.contestant-cell：选手单元格，内含 a.rated-user[href="/profile/HANDLE"]
         - 分隔行：单个 td（colspan 全表）含 "..."
-        - 虚拟参赛行（镜像/在线赛：rank 带 * 前缀）
+        - 虚拟参赛行：Who 列 profile 链接前有 *（已结束赛），或 rank 带 * / tr.virtual-highlighted-row（进行中页）
+        - 编外选手行：Who 列含 "out of competition"
 -->
 <table class="standings">
   <thead>
@@ -102,12 +103,28 @@
       <td></td>
       <td></td>
     </tr>
-    <!-- 虚拟参赛行（online mirror participant，rank 带 * 前缀）-->
-    <tr class="virtual-highlighted-row">
-      <td>*6</td>
+    <!-- 编外选手（out of competition，Div 1 用户打 Div 2 赛等）-->
+    <tr>
+      <td></td>
       <td class="contestant-cell">
         <div class="ratings-data">
-          <a href="/profile/virtual_user" class="rated-user user-blue">virtual_user</a>
+          <a href="/profile/ooc_user" class="rated-user user-red">ooc_user</a>
+          <span class="participant-info"> out of competition</span>
+        </div>
+      </td>
+      <td class="score-cell">3600</td>
+      <td>0</td>
+      <td class="cell-accepted score-cell"><span class="cell-score">475</span> <span class="cell-time">00:35</span></td>
+      <td></td>
+      <td></td>
+      <td></td>
+    </tr>
+    <!-- 虚拟参赛行（镜像/补打：Who 列 * 前缀 + 空 rank；进行中页也可能用 virtual-highlighted-row + rank *N）-->
+    <tr class="virtual-highlighted-row">
+      <td></td>
+      <td class="contestant-cell">
+        <div class="ratings-data">
+          *<a href="/profile/virtual_user" class="rated-user user-blue">virtual_user</a>
         </div>
       </td>
       <td class="score-cell">3500</td>

@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest';
-import { parseContestId, findStandingsTables, extractHandle } from '../src/content/standings.js';
+import {
+  parseContestId,
+  findStandingsTables,
+  extractHandle,
+  isUnofficialRow,
+  parseStandingsFromDOM,
+} from '../src/content/standings.js';
 
 describe('parseContestId', () => {
   it('extracts id from standard standings URL', () => {
@@ -64,5 +70,60 @@ describe('extractHandle', () => {
     const row = document.createElement('tr');
     row.innerHTML = '<td>no link here</td>';
     expect(extractHandle(row)).toBeNull();
+  });
+});
+
+describe('isUnofficialRow', () => {
+  it('detects virtual-highlighted-row class', () => {
+    const row = document.createElement('tr');
+    row.className = 'virtual-highlighted-row';
+    row.innerHTML = '<td>1</td><td class="contestant-cell"><a href="/profile/u">u</a></td>';
+    expect(isUnofficialRow(row)).toBe(true);
+  });
+
+  it('detects * prefix in rank cell', () => {
+    const row = document.createElement('tr');
+    row.innerHTML = '<td>*42</td><td class="contestant-cell"><a href="/profile/u">u</a></td>';
+    expect(isUnofficialRow(row)).toBe(true);
+  });
+
+  it('detects * before profile link in contestant cell (real CF finished contest)', () => {
+    const row = document.createElement('tr');
+    row.innerHTML =
+      '<td></td><td class="contestant-cell">*<a href="/profile/virtual_user">virtual_user</a></td>';
+    expect(isUnofficialRow(row)).toBe(true);
+  });
+
+  it('detects out of competition text in contestant cell', () => {
+    const row = document.createElement('tr');
+    row.innerHTML =
+      '<td>6</td><td class="contestant-cell"><a href="/profile/ooc">ooc</a> out of competition</td>';
+    expect(isUnofficialRow(row)).toBe(true);
+  });
+
+  it('returns false for official contestant row', () => {
+    const row = document.createElement('tr');
+    row.innerHTML = '<td>1</td><td class="contestant-cell"><a href="/profile/alice">alice</a></td>';
+    expect(isUnofficialRow(row)).toBe(false);
+  });
+});
+
+describe('parseStandingsFromDOM', () => {
+  it('skips unofficial rows and keeps official contestants only', () => {
+    const table = document.createElement('table');
+    table.innerHTML = `
+      <thead><tr><th>#</th><th>Who</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td class="contestant-cell"><a href="/profile/alice">alice</a></td></tr>
+        <tr><td>2</td><td class="contestant-cell"><a href="/profile/bob">bob</a></td></tr>
+        <tr class="virtual-highlighted-row"><td>*3</td><td class="contestant-cell"><a href="/profile/virtual">virtual</a></td></tr>
+        <tr><td></td><td class="contestant-cell">*<a href="/profile/mirror">mirror</a></td></tr>
+        <tr><td>4</td><td class="contestant-cell"><a href="/profile/ooc">ooc</a> out of competition</td></tr>
+      </tbody>
+    `;
+    const rows = parseStandingsFromDOM(table);
+    expect(rows.map((r) => r.handle)).toEqual(['alice', 'bob']);
+    expect(rows[0]!.rank).toBe(1);
+    expect(rows[1]!.rank).toBe(2);
   });
 });

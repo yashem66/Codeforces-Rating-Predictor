@@ -18,9 +18,21 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { resolve, dirname } from 'node:path';
 import { computeRatingChangesFast } from '@crp/core';
 import { _api, _clearMemCache } from '../src/lib/cfApi.js';
 import { runContentScript } from '../src/content/main.js';
+import { extractHandle } from '../src/content/standings.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+function loadStandingsFixture(): void {
+  const html = readFileSync(resolve(__dirname, 'fixtures/standings-sample.html'), 'utf-8');
+  document.body.innerHTML = html;
+}
 
 // ─────────────────────────────────────────────────────
 // 常量
@@ -554,5 +566,72 @@ describe('边界：URL 与设置', () => {
 
     expect(document.querySelectorAll('[data-crp-rating]').length).toBeGreaterThan(0);
     expect(document.querySelectorAll('[data-crp-delta]').length).toBe(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════
+// 场景 3：已结束赛页面 + DOM 降级（模拟进行中 API 不可用）
+// ═══════════════════════════════════════════════════════
+describe('E2E: 已结束赛 DOM 降级（模拟进行中 standings API 不可用）', () => {
+  const CONTEST_1900_URL = 'https://codeforces.com/contest/1900/standings';
+
+  const OFFICIAL = [
+    { handle: 'tourist', rank: 1, rating: 3800 },
+    { handle: 'Petr', rank: 2, rating: 3700 },
+    { handle: 'Um_nik', rank: 3, rating: 3500 },
+    { handle: 'neal', rank: 4, rating: 3400 },
+    { handle: 'A.K.E.E.', rank: 5, rating: 2800 },
+  ] as const;
+
+  it('从真实 CF 结构 HTML 解析官方选手，预测 delta 与 @crp/core 一致；unofficial 行显示 "—"', async () => {
+    // ratingChanges 空 → 走预测分支（模拟比赛进行中/未结算）
+    mockFetch.mockResolvedValueOnce(makeOk([]));
+    // standings API 不可用 → 降级 DOM 解析
+    mockFetch.mockResolvedValueOnce(makeFailed('Contest standings are unavailable'));
+    // user.info 仅官方选手（virtual/ooc 不应被请求——但 getUserInfos 会收到 DOM 过滤后的 handles）
+    mockFetch.mockResolvedValueOnce(
+      makeOk(OFFICIAL.map(({ handle, rating }) => ({ handle, rating }))),
+    );
+
+    loadStandingsFixture();
+
+    await runContentScript(CONTEST_1900_URL, document);
+
+    const expected = computeRatingChangesFast(
+      OFFICIAL.map(({ handle, rank, rating }) => ({ party: handle, rank, rating })),
+    );
+    const expectedDeltas = new Map(expected.map((c) => [c.party, c.delta]));
+
+    const table = document.querySelector('table.standings')!;
+    const dataRows = Array.from(table.querySelectorAll('tbody tr')).filter(
+      (r) => r.querySelector('a[href*="/profile/"]') !== null,
+    );
+
+    for (const { handle } of OFFICIAL) {
+      const row = dataRows.find(
+        (r) => extractHandle(r as HTMLTableRowElement) === handle,
+      ) as HTMLTableRowElement | undefined;
+      expect(row, `${handle} row`).toBeDefined();
+      const deltaEl = row!.querySelector('[data-crp-delta]') as HTMLElement;
+      expect(deltaEl.textContent).toBe(fmt(expectedDeltas.get(handle)!));
+    }
+
+    // unofficial 选手不在预测集合中
+    for (const unofficial of ['virtual_user', 'ooc_user'] as const) {
+      const row = dataRows.find(
+        (r) => extractHandle(r as HTMLTableRowElement) === unofficial,
+      ) as HTMLTableRowElement | undefined;
+      expect(row, `${unofficial} row`).toBeDefined();
+      expect(row!.querySelector('[data-crp-rating]')!.textContent).toBe('—');
+      expect(row!.querySelector('[data-crp-delta]')!.textContent).toBe('—');
+    }
+
+    // user.info 只应请求官方 5 人（不应包含 virtual/ooc）
+    const userInfoCall = mockFetch.mock.calls.find((c) =>
+      String(c[0]).includes('user.info'),
+    );
+    expect(userInfoCall).toBeDefined();
+    expect(String(userInfoCall![0])).not.toContain('virtual_user');
+    expect(String(userInfoCall![0])).not.toContain('ooc_user');
   });
 });
