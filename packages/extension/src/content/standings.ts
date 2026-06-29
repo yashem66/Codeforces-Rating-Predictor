@@ -177,6 +177,18 @@ function mergeStandingsPages(
   return merged;
 }
 
+function recomputeRanksByScore(rows: StandingsRow[]): StandingsRow[] {
+  let previousKey: string | null = null;
+  let previousRank = 0;
+  return rows.map((row, index) => {
+    const key = `${row.points}:${row.penalty}`;
+    const rank = key === previousKey ? previousRank : index + 1;
+    previousKey = key;
+    previousRank = rank;
+    return { ...row, rank };
+  });
+}
+
 async function fetchStandingsPages(
   contestId: number,
   pageNumbers: number[],
@@ -285,7 +297,7 @@ export async function scrapeStandingsFromDOM(
     }
   }
 
-  const merged = mergeStandingsPages(rowsByPage, totalPages);
+  const merged = recomputeRanksByScore(mergeStandingsPages(rowsByPage, totalPages));
   console.log('[CRP] DOM standings rows =', merged.length);
   return merged;
 }
@@ -321,12 +333,57 @@ export function extractRank(row: HTMLTableRowElement): number | null {
   return isNaN(n) ? null : n;
 }
 
+function normalizedCellText(cell: HTMLTableCellElement | undefined): string {
+  return cell?.textContent?.trim().toLowerCase() ?? '';
+}
+
+function parseNumberCell(cell: HTMLTableCellElement | undefined): number {
+  const text = cell?.textContent?.trim() ?? '';
+  const normalized = text.replace(/[^\d.-]/g, '');
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function findScoreColumns(table: HTMLTableElement): { scoreIdx: number | null; penaltyIdx: number | null } {
+  for (const row of Array.from(table.rows)) {
+    if (row.querySelectorAll('th').length === 0) continue;
+
+    const cells = Array.from(row.cells) as HTMLTableCellElement[];
+    const whoIdx = cells.findIndex((cell) => {
+      const text = normalizedCellText(cell);
+      return text === 'who' || text === 'handle' || text === 'участник';
+    });
+    if (whoIdx === -1) return { scoreIdx: null, penaltyIdx: null };
+
+    const scoreIdx = cells.findIndex((cell, index) => index > whoIdx && normalizedCellText(cell) === '=');
+    if (scoreIdx === -1) return { scoreIdx: null, penaltyIdx: null };
+
+    const penaltyIdx = cells.findIndex((cell, index) => index > scoreIdx && normalizedCellText(cell) === '*');
+    return {
+      scoreIdx,
+      penaltyIdx: penaltyIdx === -1 ? null : penaltyIdx,
+    };
+  }
+
+  return { scoreIdx: null, penaltyIdx: null };
+}
+
 /**
  * 判断表格行是否为 unofficial 选手（virtual / out of competition）。
  * 与 API `showUnofficial=false` 语义对齐，避免 DOM 降级时污染 rating 预测。
  */
 export function isUnofficialRow(row: HTMLTableRowElement): boolean {
   if (row.classList.contains('virtual-highlighted-row')) return true;
+
+  const rowClassText = Array.from(row.classList).join(' ').toLowerCase();
+  if (
+    rowClassText.includes('unofficial') ||
+    rowClassText.includes('practice') ||
+    rowClassText.includes('out-of-competition') ||
+    rowClassText.includes('out_of_competition')
+  ) {
+    return true;
+  }
 
   const rankText = row.cells[0]?.textContent?.trim() ?? '';
   if (rankText.startsWith('*')) return true;
@@ -335,9 +392,18 @@ export function isUnofficialRow(row: HTMLTableRowElement): boolean {
   if (contestantCell) {
     const html = contestantCell.innerHTML;
     const text = contestantCell.textContent ?? '';
+    const participantInfoText = Array.from(contestantCell.querySelectorAll('.participant-info'))
+      .map((el) => el.textContent ?? '')
+      .join(' ');
+    const titleText = Array.from(contestantCell.querySelectorAll('[title]'))
+      .map((el) => el.getAttribute('title') ?? '')
+      .join(' ');
+    if (text.trimStart().startsWith('*')) return true;
     // 已结束赛 virtual：Who 列 profile 链接前有 *（rank 列为空）
     if (/\*\s*<a\s+[^>]*href="\/profile\//i.test(html)) return true;
     if (/out of competition/i.test(text)) return true;
+    if (/\b(?:unofficial|practice|virtual)\b/i.test(participantInfoText)) return true;
+    if (/virtual participant|out of competition|\b(?:unofficial|practice)\b/i.test(titleText)) return true;
   }
 
   return false;
@@ -345,7 +411,8 @@ export function isUnofficialRow(row: HTMLTableRowElement): boolean {
 
 /** 直接从页面 DOM 解析榜单（用于比赛进行中 API 不可访问时的降级） */
 export function parseStandingsFromDOM(table: HTMLTableElement): StandingsRow[] {
-  const rows: StandingsRow[] = [];
+  const { scoreIdx, penaltyIdx } = findScoreColumns(table);
+  const parsedRows: StandingsRow[] = [];
   for (const row of Array.from(table.rows)) {
     // 跳过表头行（含 <th>）
     if (row.querySelectorAll('th').length > 0) continue;
@@ -355,9 +422,17 @@ export function parseStandingsFromDOM(table: HTMLTableElement): StandingsRow[] {
     const rank = extractRank(row);
     // 官方选手 rank 列必有数字；无 rank 的行跳过（避免误用 autoRank 污染预测）
     if (rank === null) continue;
-    rows.push({ handle, rank, points: 0, penalty: 0 });
+    parsedRows.push({
+      handle,
+      rank,
+      points: scoreIdx === null ? 0 : parseNumberCell(row.cells[scoreIdx] as HTMLTableCellElement | undefined),
+      penalty: penaltyIdx === null ? 0 : parseNumberCell(row.cells[penaltyIdx] as HTMLTableCellElement | undefined),
+    });
   }
-  return rows;
+
+  if (scoreIdx === null) return parsedRows;
+
+  return recomputeRanksByScore(parsedRows);
 }
 
 /**

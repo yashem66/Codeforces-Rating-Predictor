@@ -115,6 +115,143 @@ async function cfFetch<T>(endpoint: string, params: Record<string, string>): Pro
   return json.result as T;
 }
 
+function normalizeHeader(text: string): string {
+  return text.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function integerTokens(text: string | undefined): number[] {
+  if (text === undefined) return [];
+  return Array.from(text.matchAll(/[+-]?\d+/g))
+    .map((match) => Number(match[0]))
+    .filter((value) => Number.isFinite(value));
+}
+
+function parseSignedInt(text: string | undefined): number | null {
+  const tokens = integerTokens(text);
+  return tokens.length === 1 ? tokens[0]! : null;
+}
+
+function parseRatingTransition(text: string | undefined): { oldRating: number; newRating: number } | null {
+  const tokens = integerTokens(text);
+  if (tokens.length < 2) return null;
+  return { oldRating: tokens[0]!, newRating: tokens[1]! };
+}
+
+function extractProfileHandle(row: HTMLTableRowElement): string | null {
+  const link = row.querySelector('a[href*="/profile/"]') as HTMLAnchorElement | null;
+  if (!link) return null;
+  const href = link.getAttribute('href') ?? '';
+  const match = href.match(/\/profile\/([^/?#]+)/);
+  return match ? decodeURIComponent(match[1] ?? '') : null;
+}
+
+function findHeaderIndex(headers: string[], predicate: (header: string) => boolean): number | null {
+  const index = headers.findIndex(predicate);
+  return index === -1 ? null : index;
+}
+
+function parseRatingChangesTable(table: HTMLTableElement, contestId: number): ApiRatingChange[] {
+  const headerRow = Array.from(table.rows).find((row) => row.querySelectorAll('th').length > 0);
+  if (!headerRow) return [];
+
+  const headers = Array.from(headerRow.cells).map((cell) => normalizeHeader(cell.textContent ?? ''));
+  const rankIdx =
+    findHeaderIndex(headers, (header) => header === 'rank') ??
+    findHeaderIndex(headers, (header) => header === '#') ??
+    0;
+  const oldRatingIdx = findHeaderIndex(
+    headers,
+    (header) => header.includes('old') && header.includes('rating'),
+  );
+  const newRatingIdx = findHeaderIndex(
+    headers,
+    (header) => header.includes('new') && header.includes('rating'),
+  );
+  const ratingIdx = findHeaderIndex(
+    headers,
+    (header) =>
+      header === 'rating' ||
+      (header.includes('rating') &&
+        !header.includes('old') &&
+        !header.includes('new') &&
+        !header.includes('change') &&
+        !header.includes('delta')),
+  );
+  const deltaIdx = findHeaderIndex(
+    headers,
+    (header) => header.includes('delta') || header.includes('change') || header === '\u0394',
+  );
+
+  if (
+    (oldRatingIdx === null || newRatingIdx === null) &&
+    (ratingIdx === null || deltaIdx === null)
+  ) {
+    return [];
+  }
+
+  const rows: ApiRatingChange[] = [];
+  for (const row of Array.from(table.rows)) {
+    if (row.querySelectorAll('th').length > 0) continue;
+
+    const handle = extractProfileHandle(row);
+    if (!handle) continue;
+
+    const cells = Array.from(row.cells) as HTMLTableCellElement[];
+    const rank = parseSignedInt(cells[rankIdx]?.textContent ?? '');
+    if (rank === null) continue;
+
+    let oldRating: number | null;
+    let newRating: number | null;
+    if (oldRatingIdx !== null && newRatingIdx !== null) {
+      oldRating = parseSignedInt(cells[oldRatingIdx]?.textContent ?? '');
+      newRating = parseSignedInt(cells[newRatingIdx]?.textContent ?? '');
+    } else {
+      const transition = parseRatingTransition(cells[ratingIdx!]?.textContent ?? '');
+      if (transition !== null) {
+        oldRating = transition.oldRating;
+        newRating = transition.newRating;
+      } else {
+        newRating = parseSignedInt(cells[ratingIdx!]?.textContent ?? '');
+        const delta = parseSignedInt(cells[deltaIdx!]?.textContent ?? '');
+        oldRating = newRating !== null && delta !== null ? newRating - delta : null;
+      }
+    }
+
+    if (oldRating === null || newRating === null) continue;
+    rows.push({
+      contestId,
+      contestName: '',
+      handle,
+      rank,
+      ratingUpdateTimeSeconds: 0,
+      oldRating,
+      newRating,
+    });
+  }
+
+  return rows;
+}
+
+export function parseRatingChangesHtml(html: string, contestId: number): ApiRatingChange[] {
+  if (typeof DOMParser === 'undefined') return [];
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  for (const table of Array.from(doc.querySelectorAll('table')) as HTMLTableElement[]) {
+    const rows = parseRatingChangesTable(table, contestId);
+    if (rows.length > 0) return rows;
+  }
+  return [];
+}
+
+async function getRatingChangesFromHtml(contestId: number): Promise<ApiRatingChange[]> {
+  try {
+    const res = await _api.fetchImpl(`https://codeforces.com/contest/${contestId}/ratings`);
+    if (!res.ok) return [];
+    return parseRatingChangesHtml(await res.text(), contestId);
+  } catch {
+    return [];
+  }
+}
+
 export class EmptyResultError extends Error {
   constructor(message: string) {
     super(message);
@@ -130,15 +267,25 @@ export class StandingsUnavailableError extends Error {
   }
 }
 
+export interface GetRatingChangesOptions {
+  htmlFallback?: boolean;
+}
+
 /** 获取已结束赛的 rating 变化；若未计分/未找到则返回空数组 */
-export async function getRatingChanges(contestId: number): Promise<ApiRatingChange[]> {
+export async function getRatingChanges(
+  contestId: number,
+  options: GetRatingChangesOptions = {},
+): Promise<ApiRatingChange[]> {
   try {
     const result = await cfFetch<ApiRatingChange[]>('contest.ratingChanges', {
       contestId: String(contestId),
     });
-    return result;
+    if (result.length > 0) return result;
+    return options.htmlFallback ? getRatingChangesFromHtml(contestId) : [];
   } catch (e) {
-    if (e instanceof EmptyResultError) return [];
+    if (e instanceof EmptyResultError) {
+      return options.htmlFallback ? getRatingChangesFromHtml(contestId) : [];
+    }
     throw e;
   }
 }

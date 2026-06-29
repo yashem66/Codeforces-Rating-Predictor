@@ -97,10 +97,38 @@ describe('isUnofficialRow', () => {
     expect(isUnofficialRow(row)).toBe(true);
   });
 
+  it('detects * before handle when flag markup appears before the link', () => {
+    const row = document.createElement('tr');
+    row.innerHTML =
+      '<td>1</td><td class="contestant-cell"><img class="flag" src="/flags/24/cn.png" alt="CN"> *<a href="/profile/Otomachi_Una">Otomachi_Una</a></td>';
+    expect(isUnofficialRow(row)).toBe(true);
+  });
+
+  it('detects CF small-star marker before profile link', () => {
+    const row = document.createElement('tr');
+    row.innerHTML =
+      '<td>1</td><td class="contestant-cell"><img class="standings-flag" src="/flags/24/cn.png" alt="China"><small>*</small><a href="/profile/Otomachi_Una">Otomachi_Una</a></td>';
+    expect(isUnofficialRow(row)).toBe(true);
+  });
+
+  it('detects virtual participant marker in standings cell', () => {
+    const row = document.createElement('tr');
+    row.innerHTML =
+      '<td>5</td><td class="contestant-cell"><a href="/profile/leduchuy">leduchuy</a><sup title="Virtual participant"><a href="/contest/1/standings/participant/1#p1">#</a></sup></td>';
+    expect(isUnofficialRow(row)).toBe(true);
+  });
+
   it('detects out of competition text in contestant cell', () => {
     const row = document.createElement('tr');
     row.innerHTML =
       '<td>6</td><td class="contestant-cell"><a href="/profile/ooc">ooc</a> out of competition</td>';
+    expect(isUnofficialRow(row)).toBe(true);
+  });
+
+  it('detects unofficial participant-info labels', () => {
+    const row = document.createElement('tr');
+    row.innerHTML =
+      '<td>6</td><td class="contestant-cell"><a href="/profile/u">u</a><span class="participant-info"> unofficial</span></td>';
     expect(isUnofficialRow(row)).toBe(true);
   });
 
@@ -122,12 +150,33 @@ describe('parseStandingsFromDOM', () => {
         <tr class="virtual-highlighted-row"><td>*3</td><td class="contestant-cell"><a href="/profile/virtual">virtual</a></td></tr>
         <tr><td></td><td class="contestant-cell">*<a href="/profile/mirror">mirror</a></td></tr>
         <tr><td>4</td><td class="contestant-cell"><a href="/profile/ooc">ooc</a> out of competition</td></tr>
+        <tr><td>5</td><td class="contestant-cell"><a href="/profile/unofficial">unofficial</a><span class="participant-info"> unofficial</span></td></tr>
       </tbody>
     `;
     const rows = parseStandingsFromDOM(table);
     expect(rows.map((r) => r.handle)).toEqual(['alice', 'bob']);
     expect(rows[0]!.rank).toBe(1);
     expect(rows[1]!.rank).toBe(2);
+  });
+
+  it('recomputes official ranks after filtering unofficial rows', () => {
+    const table = document.createElement('table');
+    table.innerHTML = `
+      <thead><tr><th>#</th><th>Who</th><th>=</th><th>*</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td class="contestant-cell"><small>*</small><a href="/profile/ghost">ghost</a></td><td>300</td><td>10</td></tr>
+        <tr><td>2</td><td class="contestant-cell"><a href="/profile/alice">alice</a></td><td>250</td><td>20</td></tr>
+        <tr><td>3</td><td class="contestant-cell"><a href="/profile/virtual">virtual</a><sup title="Virtual participant"><a href="/contest/1/standings/participant/1#p1">#</a></sup></td><td>200</td><td>30</td></tr>
+        <tr><td>4</td><td class="contestant-cell"><a href="/profile/bob">bob</a></td><td>150</td><td>40</td></tr>
+      </tbody>
+    `;
+
+    const rows = parseStandingsFromDOM(table);
+
+    expect(rows.map((r) => ({ handle: r.handle, rank: r.rank, points: r.points, penalty: r.penalty }))).toEqual([
+      { handle: 'alice', rank: 1, points: 250, penalty: 20 },
+      { handle: 'bob', rank: 2, points: 150, penalty: 40 },
+    ]);
   });
 });
 
@@ -248,6 +297,43 @@ describe('scrapeStandingsFromDOM', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(maxInFlight).toBeLessThanOrEqual(2);
     expect(onPageRows).toHaveBeenCalled();
+  });
+
+  it('recomputes ranks globally after merging paged DOM standings', async () => {
+    document.body.innerHTML = `
+      <table class="standings">
+        <thead><tr><th>#</th><th>Who</th><th>=</th><th>*</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td class="contestant-cell"><small>*</small><a href="/profile/ghost1">ghost1</a></td><td>300</td><td>10</td></tr>
+          <tr><td>2</td><td class="contestant-cell"><a href="/profile/alice">alice</a></td><td>250</td><td>20</td></tr>
+        </tbody>
+      </table>
+      <a href="/contest/99/standings/page/2">2</a>
+    `;
+
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      text: async () => `
+        <html><body>
+          <table class="standings">
+            <thead><tr><th>#</th><th>Who</th><th>=</th><th>*</th></tr></thead>
+            <tbody>
+              <tr><td>21</td><td class="contestant-cell"><small>*</small><a href="/profile/ghost2">ghost2</a></td><td>240</td><td>30</td></tr>
+              <tr><td>22</td><td class="contestant-cell"><a href="/profile/bob">bob</a></td><td>230</td><td>40</td></tr>
+              <tr><td>23</td><td class="contestant-cell"><a href="/profile/carol">carol</a></td><td>220</td><td>50</td></tr>
+            </tbody>
+          </table>
+        </body></html>
+      `,
+    }) as Response);
+
+    const rows = await scrapeStandingsFromDOM(99, document, { fetchImpl, concurrency: 1 });
+
+    expect(rows!.map((r) => ({ handle: r.handle, rank: r.rank }))).toEqual([
+      { handle: 'alice', rank: 1 },
+      { handle: 'bob', rank: 2 },
+      { handle: 'carol', rank: 3 },
+    ]);
   });
 
   it('retries on HTTP 503 and still merges rows in page order', async () => {

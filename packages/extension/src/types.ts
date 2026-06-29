@@ -27,7 +27,7 @@ export interface UserInfo {
 export interface Settings {
   showRating: boolean;
   showDelta: boolean;
-  /** 调试：强制从页面 DOM 抓取榜单并走预测（忽略 ratingChanges / standings API） */
+  /** 调试：强制从页面 DOM 抓取榜单并走预测（忽略 standings API；已结算比赛仍用 ratingChanges 的赛前 rating） */
   debugForceDomPredict: boolean;
 }
 

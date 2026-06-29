@@ -1,8 +1,10 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   getRatingChanges,
   getStandings,
   getUserInfos,
+  parseRatingChangesHtml,
   UserRatingPrefetcher,
   _clearMemCache,
   _api,
@@ -22,6 +24,13 @@ function makeFailed(comment: string): Response {
   return {
     ok: true,
     json: async () => ({ status: 'FAILED', comment }),
+  } as unknown as Response;
+}
+
+function makeHtml(html: string): Response {
+  return {
+    ok: true,
+    text: async () => html,
   } as unknown as Response;
 }
 
@@ -66,6 +75,128 @@ describe('getRatingChanges', () => {
   it('throws on non-empty-result errors', async () => {
     mockFetch.mockResolvedValueOnce(makeFailed('Request limit exceeded'));
     await expect(getRatingChanges(1)).rejects.toThrow('CF API error');
+  });
+
+  it('falls back to contest rating HTML when API returns an empty result', async () => {
+    mockFetch.mockResolvedValueOnce(makeOk([]));
+    mockFetch.mockImplementationOnce(async (url: string) => {
+      if (!url.endsWith('/contest/1106/ratings')) return makeHtml('');
+      return makeHtml(`
+          <table class="ratings">
+            <thead>
+              <tr>
+                <th>#</th><th>Who</th><th>Rank</th>
+                <th>Old Rating</th><th>New Rating</th><th>Change</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>1</td><td><a href="/profile/alice">alice</a></td><td>2</td>
+                <td>1800</td><td>1867</td><td>+67</td>
+              </tr>
+            </tbody>
+          </table>
+        `);
+    });
+
+    const result = await getRatingChanges(1106, { htmlFallback: true });
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(String(mockFetch.mock.calls[1]![0])).toContain('/contest/1106/ratings');
+    expect(result).toEqual([
+      {
+        contestId: 1106,
+        contestName: '',
+        handle: 'alice',
+        rank: 2,
+        ratingUpdateTimeSeconds: 0,
+        oldRating: 1800,
+        newRating: 1867,
+      },
+    ]);
+  });
+});
+
+describe('parseRatingChangesHtml', () => {
+  it('parses old and new rating columns', () => {
+    const rows = parseRatingChangesHtml(
+      `
+        <table>
+          <tr><th>#</th><th>Who</th><th>Rank</th><th>Old Rating</th><th>New Rating</th></tr>
+          <tr>
+            <td>1</td><td><a href="/profile/tourist">tourist</a></td><td>4</td>
+            <td>3800</td><td>3821</td>
+          </tr>
+        </table>
+      `,
+      42,
+    );
+
+    expect(rows).toEqual([
+      {
+        contestId: 42,
+        contestName: '',
+        handle: 'tourist',
+        rank: 4,
+        ratingUpdateTimeSeconds: 0,
+        oldRating: 3800,
+        newRating: 3821,
+      },
+    ]);
+  });
+
+  it('parses new rating plus delta columns', () => {
+    const rows = parseRatingChangesHtml(
+      `
+        <table>
+          <tr><th>Rank</th><th>Who</th><th>Rating</th><th>Delta</th></tr>
+          <tr>
+            <td>10</td><td><a href="/profile/bob">bob</a></td>
+            <td>1512</td><td>-18</td>
+          </tr>
+        </table>
+      `,
+      43,
+    );
+
+    expect(rows).toEqual([
+      {
+        contestId: 43,
+        contestName: '',
+        handle: 'bob',
+        rank: 10,
+        ratingUpdateTimeSeconds: 0,
+        oldRating: 1530,
+        newRating: 1512,
+      },
+    ]);
+  });
+
+  it('parses rating transition cells', () => {
+    const rows = parseRatingChangesHtml(
+      `
+        <table>
+          <tr><th>Rank</th><th>Who</th><th>Rating change</th><th>Rating</th></tr>
+          <tr>
+            <td>5</td><td><a href="/profile/carol">carol</a></td>
+            <td>+97</td><td>1277 -> 1374</td>
+          </tr>
+        </table>
+      `,
+      44,
+    );
+
+    expect(rows).toEqual([
+      {
+        contestId: 44,
+        contestName: '',
+        handle: 'carol',
+        rank: 5,
+        ratingUpdateTimeSeconds: 0,
+        oldRating: 1277,
+        newRating: 1374,
+      },
+    ]);
   });
 });
 

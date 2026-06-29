@@ -5,6 +5,10 @@ import { injectColumns } from './inject.js';
 import { parseContestId, findStandingsTables, scrapeStandingsFromDOM } from './standings.js';
 import type { RowData } from '../types.js';
 
+function isFinalStandingsPage(doc: Document): boolean {
+  return /final standings/i.test(doc.body.textContent ?? '');
+}
+
 /**
  * 内容脚本核心逻辑（可注入 url/doc，便于测试）。
  * 运行时由 main() 以 location.href 和 document 调用。
@@ -29,11 +33,15 @@ export async function runContentScript(url: string, doc: Document = document): P
   let dataMap: Map<string, RowData>;
 
   try {
-    const ratingChanges = settings.debugForceDomPredict
-      ? []
-      : await getRatingChanges(contestId);
+    const ratingChanges = await getRatingChanges(contestId, {
+      htmlFallback: isFinalStandingsPage(doc),
+    });
+    const oldRatings = new Map<string, number>();
+    for (const rc of ratingChanges) {
+      oldRatings.set(rc.handle, rc.oldRating);
+    }
     console.log('[CRP] ratingChanges length =', ratingChanges.length);
-    if (ratingChanges.length > 0) {
+    if (ratingChanges.length > 0 && !settings.debugForceDomPredict) {
       const finals = finalDeltas(ratingChanges);
       dataMap = new Map<string, RowData>();
       for (const [handle, { rating, delta }] of finals) {
@@ -45,7 +53,8 @@ export async function runContentScript(url: string, doc: Document = document): P
         console.info('[CRP] Debug: using DOM scrape as primary standings source');
         const prefetcher = new UserRatingPrefetcher();
         rows = await scrapeStandingsFromDOM(contestId, doc, {
-          onPageRows: (pageRows) => prefetcher.add(pageRows.map((r) => r.handle)),
+          onPageRows: (pageRows) =>
+            prefetcher.add(pageRows.map((r) => r.handle).filter((handle) => !oldRatings.has(handle))),
         });
         if (rows === null) {
           console.warn('[CRP] No standings table found in DOM, skipping injection');
@@ -60,7 +69,8 @@ export async function runContentScript(url: string, doc: Document = document): P
             console.info('[CRP] Standings API unavailable, falling back to HTML page scraping:', e.message);
             const prefetcher = new UserRatingPrefetcher();
             rows = await scrapeStandingsFromDOM(contestId, doc, {
-              onPageRows: (pageRows) => prefetcher.add(pageRows.map((r) => r.handle)),
+              onPageRows: (pageRows) =>
+                prefetcher.add(pageRows.map((r) => r.handle).filter((handle) => !oldRatings.has(handle))),
             });
             if (rows === null) {
               console.warn('[CRP] No standings table found in DOM, skipping injection');
@@ -73,8 +83,8 @@ export async function runContentScript(url: string, doc: Document = document): P
         }
       }
       const handles = rows.map((r) => r.handle);
-      const userInfos = await getUserInfos(handles);
-      const ratingsMap = new Map<string, number | undefined>();
+      const userInfos = await getUserInfos(handles.filter((handle) => !oldRatings.has(handle)));
+      const ratingsMap = new Map<string, number | undefined>(oldRatings);
       for (const u of userInfos) {
         ratingsMap.set(u.handle, u.rating);
       }

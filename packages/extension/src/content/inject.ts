@@ -1,10 +1,11 @@
-import { extractHandle } from './standings.js';
+import { extractHandle, isUnofficialRow } from './standings.js';
 import type { RowData } from '../types.js';
 
 const INJECTED_ATTR = 'data-crp-injected';
 const RATING_ATTR = 'data-crp-rating';
 const DELTA_ATTR = 'data-crp-delta';
 const STYLE_ID = 'crp-injected-style';
+const EMPTY_CELL_TEXT = '\u2014';
 
 /** 返回 CF 段位对应的十六进制颜色字符串（小写） */
 export function ratingColor(rating: number): string {
@@ -183,7 +184,7 @@ export function injectColumns(
 
     // 数据行：插入在选手列之后（与表头列对齐）
     const handle = extractHandle(row);
-    const rowData = handle ? data.get(handle) : undefined;
+    const rowData = !isUnofficialRow(row) && handle ? data.get(handle) : undefined;
     const cells = Array.from(row.cells);
     const refCell = cells[Math.min(contestantColIdx, cells.length - 1)] as HTMLTableCellElement;
 
@@ -191,7 +192,7 @@ export function injectColumns(
       const td = document.createElement('td');
       td.setAttribute(RATING_ATTR, '1');
       td.textContent =
-        rowData?.rating !== undefined ? String(rowData.rating) : '—';
+        rowData?.rating !== undefined ? String(rowData.rating) : EMPTY_CELL_TEXT;
       if (rowData?.rating !== undefined) {
         td.style.color = ratingColor(rowData.rating);
       }
@@ -205,7 +206,7 @@ export function injectColumns(
         td.textContent = formatDelta(rowData.delta);
         td.className = colorClass(rowData.delta);
       } else {
-        td.textContent = '—';
+        td.textContent = EMPTY_CELL_TEXT;
       }
       const ratingTd = row.querySelector(`td[${RATING_ATTR}]`);
       if (ratingTd) {

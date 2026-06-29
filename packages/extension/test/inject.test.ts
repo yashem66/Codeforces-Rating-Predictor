@@ -3,6 +3,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { injectColumns, ratingColor } from '../src/content/inject.js';
 import type { RowData } from '../src/types.js';
 
+const EMPTY_TEXT = '\u2014';
+
 /** 构造一个简单的 standings 表格 */
 function buildTable(): HTMLTableElement {
   const table = document.createElement('table');
@@ -148,7 +150,67 @@ describe('injectColumns', () => {
     const rows = Array.from(table.querySelectorAll('tbody tr'));
     const noHandleRow = rows[rows.length - 1]!;
     const ratingTd = noHandleRow.querySelector('[data-crp-rating]') as HTMLElement;
-    expect(ratingTd.textContent).toBe('—');
+    expect(ratingTd.textContent).toBe(EMPTY_TEXT);
+  });
+
+  it('fills empty values for unofficial rows even when data contains the same handle', () => {
+    const unofficialRow = document.createElement('tr');
+    unofficialRow.innerHTML = `
+      <td>4</td>
+      <td class="contestant-cell">
+        <a href="/profile/bob">bob</a><span class="participant-info"> unofficial</span>
+      </td>
+      <td>50</td>
+    `;
+    table.querySelector('tbody')!.appendChild(unofficialRow);
+
+    injectColumns(table, data, { showRating: true, showDelta: true });
+
+    const ratingTd = unofficialRow.querySelector('[data-crp-rating]') as HTMLElement;
+    const deltaTd = unofficialRow.querySelector('[data-crp-delta]') as HTMLElement;
+    expect(ratingTd.textContent).toBe(EMPTY_TEXT);
+    expect(deltaTd.textContent).toBe(EMPTY_TEXT);
+    expect(deltaTd.className).toBe('');
+  });
+
+  it('fills empty values for starred unofficial rows with flag markup', () => {
+    const unofficialRow = document.createElement('tr');
+    unofficialRow.innerHTML = `
+      <td>4</td>
+      <td class="contestant-cell">
+        <img class="flag" src="/flags/24/us.png" alt="US"> *<a href="/profile/bob">bob</a>
+      </td>
+      <td>50</td>
+    `;
+    table.querySelector('tbody')!.appendChild(unofficialRow);
+
+    injectColumns(table, data, { showRating: true, showDelta: true });
+
+    const ratingTd = unofficialRow.querySelector('[data-crp-rating]') as HTMLElement;
+    const deltaTd = unofficialRow.querySelector('[data-crp-delta]') as HTMLElement;
+    expect(ratingTd.textContent).toBe(EMPTY_TEXT);
+    expect(deltaTd.textContent).toBe(EMPTY_TEXT);
+    expect(deltaTd.className).toBe('');
+  });
+
+  it('fills empty values for virtual participant rows with # marker', () => {
+    const virtualRow = document.createElement('tr');
+    virtualRow.innerHTML = `
+      <td>4</td>
+      <td class="contestant-cell">
+        <a href="/profile/bob">bob</a><sup title="Virtual participant"><a href="/contest/1/standings/participant/1#p1">#</a></sup>
+      </td>
+      <td>50</td>
+    `;
+    table.querySelector('tbody')!.appendChild(virtualRow);
+
+    injectColumns(table, data, { showRating: true, showDelta: true });
+
+    const ratingTd = virtualRow.querySelector('[data-crp-rating]') as HTMLElement;
+    const deltaTd = virtualRow.querySelector('[data-crp-delta]') as HTMLElement;
+    expect(ratingTd.textContent).toBe(EMPTY_TEXT);
+    expect(deltaTd.textContent).toBe(EMPTY_TEXT);
+    expect(deltaTd.className).toBe('');
   });
 
   it('is idempotent: calling twice does not duplicate columns', () => {

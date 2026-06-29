@@ -56,6 +56,13 @@ function makeFailed(comment: string): Response {
   } as unknown as Response;
 }
 
+function makeHtml(html: string): Response {
+  return {
+    ok: true,
+    text: async () => html,
+  } as unknown as Response;
+}
+
 function makeHttpError(status: number): Response {
   return {
     ok: false,
@@ -134,6 +141,8 @@ function fmt(delta: number): string {
   return delta > 0 ? `+${delta}` : String(delta);
 }
 
+const EMPTY_TEXT = '\u2014';
+
 // ─────────────────────────────────────────────────────
 // 全局 mock fetch
 // ─────────────────────────────────────────────────────
@@ -207,6 +216,33 @@ describe('E2E: 已结束 rated 赛（ratingChanges 真实值）', () => {
     const headers = Array.from(document.querySelectorAll('th')).map((th) => th.textContent?.trim());
     expect(headers).toContain('Rating');
     expect(headers).toContain('Pred Δ');
+  });
+
+  it('API 返回空时在 Final standings 页面回退解析 rating HTML', async () => {
+    mockFetch
+      .mockResolvedValueOnce(makeOk([]))
+      .mockResolvedValueOnce(
+        makeHtml(`
+          <table>
+            <tr><th>#</th><th>Who</th><th>Rank</th><th>Old Rating</th><th>New Rating</th></tr>
+            <tr>
+              <td>1</td><td><a href="/profile/alice">alice</a></td><td>1</td>
+              <td>1800</td><td>1867</td>
+            </tr>
+          </table>
+        `),
+      );
+
+    document.body.innerHTML = '<div>Final standings</div>';
+    buildStandingsTable([{ handle: 'alice', rank: 1 }]);
+
+    await runContentScript(CONTEST_URL, document);
+
+    const row = document.querySelector('tbody tr') as HTMLTableRowElement;
+    expect(row.querySelector('[data-crp-rating]')!.textContent).toBe('1800');
+    expect(row.querySelector('[data-crp-delta]')!.textContent).toBe('+67');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(String(mockFetch.mock.calls[1]![0])).toContain('/contest/1234/rating');
   });
 
   it('幂等：二次调用不重复加列', async () => {
@@ -637,5 +673,158 @@ describe('E2E: 已结束赛 DOM 降级（模拟进行中 standings API 不可用
     expect(userInfoCall).toBeDefined();
     expect(String(userInfoCall![0])).not.toContain('virtual_user');
     expect(String(userInfoCall![0])).not.toContain('ooc_user');
+  });
+
+  it('excludes unofficial DOM rows before predicting official deltas', async () => {
+    mockFetch.mockResolvedValueOnce(makeOk([]));
+    mockFetch.mockResolvedValueOnce(makeFailed('Contest standings are unavailable'));
+    mockFetch.mockResolvedValueOnce(
+      makeOk([
+        { handle: 'alice', rating: 1800 },
+        { handle: 'bob', rating: 1500 },
+        { handle: 'ghost', rating: 1400 },
+      ]),
+    );
+
+    document.body.innerHTML = `
+      <table class="standings">
+        <thead><tr><th>#</th><th>Who</th><th>=</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td class="contestant-cell"><a href="/profile/alice">alice</a></td><td>300</td></tr>
+          <tr><td>2</td><td class="contestant-cell"><a href="/profile/bob">bob</a></td><td>200</td></tr>
+          <tr>
+            <td>3</td>
+            <td class="contestant-cell">
+              <a href="/profile/ghost">ghost</a><span class="participant-info"> unofficial</span>
+            </td>
+            <td>100</td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+
+    await runContentScript(CONTEST_1900_URL, document);
+
+    const expected = computeRatingChangesFast([
+      { party: 'alice', rank: 1, rating: 1800 },
+      { party: 'bob', rank: 2, rating: 1500 },
+    ]);
+    const expectedDeltas = new Map(expected.map((c) => [c.party, c.delta]));
+    const rows = Array.from(document.querySelectorAll('tbody tr')) as HTMLTableRowElement[];
+
+    for (const handle of ['alice', 'bob'] as const) {
+      const row = rows.find((r) => extractHandle(r) === handle)!;
+      const deltaEl = row.querySelector('[data-crp-delta]') as HTMLElement;
+      expect(deltaEl.textContent, `${handle} delta`).toBe(fmt(expectedDeltas.get(handle)!));
+    }
+
+    const unofficialRow = rows.find((r) => extractHandle(r) === 'ghost')!;
+    expect(unofficialRow.querySelector('[data-crp-rating]')!.textContent).toBe(EMPTY_TEXT);
+    expect(unofficialRow.querySelector('[data-crp-delta]')!.textContent).toBe(EMPTY_TEXT);
+
+    const userInfoCall = mockFetch.mock.calls.find((c) =>
+      String(c[0]).includes('user.info'),
+    );
+    expect(userInfoCall).toBeDefined();
+    expect(String(userInfoCall![0])).not.toContain('ghost');
+  });
+});
+
+describe('E2E: Debug DOM 预测模式', () => {
+  it('uses ratingChanges oldRating instead of current user.info rating when predicting finished contests', async () => {
+    stubChromeSettings({ debugForceDomPredict: true });
+
+    const ratingChanges = [
+      {
+        contestId: 1234, contestName: 'T', handle: 'alice', rank: 1,
+        ratingUpdateTimeSeconds: 0, oldRating: 1800, newRating: 1850,
+      },
+      {
+        contestId: 1234, contestName: 'T', handle: 'bob', rank: 2,
+        ratingUpdateTimeSeconds: 0, oldRating: 1500, newRating: 1480,
+      },
+    ];
+
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes('contest.ratingChanges')) return makeOk(ratingChanges);
+      if (url.includes('user.info')) {
+        return makeOk([
+          { handle: 'alice', rating: 2400 },
+          { handle: 'bob', rating: 1000 },
+        ]);
+      }
+      return makeFailed(`Unexpected URL: ${url}`);
+    });
+
+    buildStandingsTable([
+      { handle: 'alice', rank: 1 },
+      { handle: 'bob', rank: 2 },
+    ]);
+
+    await runContentScript(CONTEST_URL, document);
+
+    const expected = computeRatingChangesFast([
+      { party: 'alice', rank: 1, rating: 1800 },
+      { party: 'bob', rank: 2, rating: 1500 },
+    ]);
+    const expectedDeltas = new Map(expected.map((c) => [c.party, c.delta]));
+    const rows = Array.from(document.querySelectorAll('tbody tr')) as HTMLTableRowElement[];
+
+    const aliceRating = rows[0]!.querySelector('[data-crp-rating]') as HTMLElement;
+    const aliceDelta = rows[0]!.querySelector('[data-crp-delta]') as HTMLElement;
+    expect(aliceRating.textContent).toBe('1800');
+    expect(aliceDelta.textContent).toBe(fmt(expectedDeltas.get('alice')!));
+
+    const bobRating = rows[1]!.querySelector('[data-crp-rating]') as HTMLElement;
+    const bobDelta = rows[1]!.querySelector('[data-crp-delta]') as HTMLElement;
+    expect(bobRating.textContent).toBe('1500');
+    expect(bobDelta.textContent).toBe(fmt(expectedDeltas.get('bob')!));
+
+    expect(mockFetch.mock.calls.some((c) => String(c[0]).includes('user.info'))).toBe(false);
+  });
+
+  it('recomputes ranks from official DOM rows before predicting deltas', async () => {
+    stubChromeSettings({ debugForceDomPredict: true });
+
+    const ratingChanges = [
+      {
+        contestId: 1234, contestName: 'T', handle: 'alice', rank: 1,
+        ratingUpdateTimeSeconds: 0, oldRating: 1800, newRating: 1850,
+      },
+      {
+        contestId: 1234, contestName: 'T', handle: 'bob', rank: 2,
+        ratingUpdateTimeSeconds: 0, oldRating: 1500, newRating: 1480,
+      },
+    ];
+
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.includes('contest.ratingChanges')) return makeOk(ratingChanges);
+      return makeFailed(`Unexpected URL: ${url}`);
+    });
+
+    document.body.innerHTML = `
+      <table class="standings">
+        <thead><tr><th>#</th><th>Who</th><th>=</th><th>*</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td class="contestant-cell"><small>*</small><a href="/profile/ghost">ghost</a></td><td>300</td><td>10</td></tr>
+          <tr><td>2</td><td class="contestant-cell"><a href="/profile/alice">alice</a></td><td>250</td><td>20</td></tr>
+          <tr><td>3</td><td class="contestant-cell"><a href="/profile/bob">bob</a></td><td>150</td><td>40</td></tr>
+        </tbody>
+      </table>
+    `;
+
+    await runContentScript(CONTEST_URL, document);
+
+    const expected = computeRatingChangesFast([
+      { party: 'alice', rank: 1, rating: 1800 },
+      { party: 'bob', rank: 2, rating: 1500 },
+    ]);
+    const expectedDeltas = new Map(expected.map((c) => [c.party, c.delta]));
+    const rows = Array.from(document.querySelectorAll('tbody tr')) as HTMLTableRowElement[];
+    const aliceRow = rows.find((r) => extractHandle(r) === 'alice')!;
+    const bobRow = rows.find((r) => extractHandle(r) === 'bob')!;
+
+    expect(aliceRow.querySelector('[data-crp-delta]')!.textContent).toBe(fmt(expectedDeltas.get('alice')!));
+    expect(bobRow.querySelector('[data-crp-delta]')!.textContent).toBe(fmt(expectedDeltas.get('bob')!));
   });
 });
