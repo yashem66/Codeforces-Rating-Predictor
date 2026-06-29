@@ -192,6 +192,12 @@ function buildStandingsPageHtml(entries: { handle: string; rank: number }[]): st
   return `<html><body><table class="standings"><tbody>${rows}</tbody></table></body></html>`;
 }
 
+function fetchInputUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.toString();
+  return input.url;
+}
+
 describe('scrapeStandingsFromDOM', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
@@ -216,7 +222,8 @@ describe('scrapeStandingsFromDOM', () => {
 
     let inFlight = 0;
     let maxInFlight = 0;
-    const fetchImpl = vi.fn(async (url: string) => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = fetchInputUrl(input);
       inFlight++;
       maxInFlight = Math.max(maxInFlight, inFlight);
       await new Promise((r) => setTimeout(r, 10));
@@ -255,7 +262,8 @@ describe('scrapeStandingsFromDOM', () => {
     `;
 
     let page2Attempts = 0;
-    const fetchImpl = vi.fn(async (url: string) => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = fetchInputUrl(input);
       if (url.includes('/page/2')) {
         page2Attempts++;
         if (page2Attempts < 2) {
