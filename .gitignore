@@ -4,3 +4,9 @@ dist/
 data/
 .DS_Store
 coverage/
+.codex/auth.json
+.codex/history.jsonl
+.codex/config.local.toml
+.codex/cache/
+.codex/logs/
+.codex/sessions/

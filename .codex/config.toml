@@ -1,0 +1,7 @@
+# Project-scoped Codex configuration for Codeforces Rating Predictor.
+#
+# This file intentionally avoids personal settings such as model/provider
+# selection, authentication, notification commands, and machine-local paths.
+# Keep those in user-level ~/.codex/config.toml instead.
+#
+# Project command approval rules live in ./rules/default.rules.

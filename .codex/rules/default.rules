@@ -1,0 +1,239 @@
+# Codex exec-policy rules for this repository.
+#
+# These rules mirror the intent of .cursor/permissions.json for Codex. They
+# control which commands can run outside the sandbox without prompting; they do
+# not replace AGENTS.md project instructions.
+
+prefix_rule(
+    pattern = [["Get-ChildItem", "Get-Content", "Select-String", "Test-Path", "Resolve-Path", "rg", "where.exe"]],
+    decision = "allow",
+    justification = "Repository inspection commands are allowed for routine codebase exploration.",
+    match = [
+        "Get-ChildItem -Force",
+        "Get-Content AGENTS.md",
+        "Select-String -Path AGENTS.md -Pattern pnpm",
+        "Test-Path package.json",
+        "Resolve-Path .",
+        "rg Math.trunc",
+        "where.exe git",
+    ],
+)
+
+prefix_rule(
+    pattern = ["git", ["status", "diff", "log", "show"]],
+    decision = "allow",
+    justification = "Read-only Git inspection is allowed.",
+    match = [
+        "git status",
+        "git diff",
+        "git log --oneline",
+        "git show HEAD",
+    ],
+)
+
+prefix_rule(
+    pattern = ["git", ["add", "commit", "switch", "checkout", "branch"]],
+    decision = "allow",
+    justification = "Standard local Git workflow commands are allowed, matching the Cursor project permissions.",
+    match = [
+        "git add AGENTS.md",
+        "git commit -m docs: update instructions",
+        "git switch feature-branch",
+        "git checkout main",
+        "git branch codex/example",
+    ],
+)
+
+prefix_rule(
+    pattern = ["git", "checkout", "--"],
+    decision = "prompt",
+    justification = "Checking out paths can discard local changes; require approval.",
+    match = [
+        "git checkout -- AGENTS.md",
+    ],
+)
+
+prefix_rule(
+    pattern = ["git", "commit", "--amend"],
+    decision = "prompt",
+    justification = "Amending commits rewrites local history; require approval.",
+    match = [
+        "git commit --amend",
+    ],
+)
+
+prefix_rule(
+    pattern = ["git", "branch", ["-d", "-D", "--delete"]],
+    decision = "prompt",
+    justification = "Deleting branches is potentially destructive; require approval.",
+    match = [
+        "git branch -d old-branch",
+        "git branch -D old-branch",
+        "git branch --delete old-branch",
+    ],
+)
+
+prefix_rule(
+    pattern = ["git", "rm"],
+    decision = "prompt",
+    justification = "Removing tracked files is destructive; require approval.",
+    match = [
+        "git rm old-file.txt",
+        "git rm -r old-dir",
+    ],
+)
+
+prefix_rule(
+    pattern = ["git", "push"],
+    decision = "prompt",
+    justification = "Pushing changes affects remotes; require approval.",
+    match = [
+        "git push",
+        "git push origin main",
+        "git push --force-with-lease",
+    ],
+)
+
+prefix_rule(
+    pattern = ["git", ["reset", "rebase", "filter-branch"]],
+    decision = "prompt",
+    justification = "History or working-tree rewriting Git commands require approval.",
+    match = [
+        "git reset --hard",
+        "git rebase main",
+        "git filter-branch --tree-filter echo",
+    ],
+)
+
+prefix_rule(
+    pattern = [["python", "py", "pip", "pytest", "uv"]],
+    decision = "allow",
+    justification = "Python tooling is allowed by the existing Cursor project permissions.",
+    match = [
+        "python --version",
+        "py --version",
+        "pip --version",
+        "pytest",
+        "uv --version",
+    ],
+)
+
+prefix_rule(
+    pattern = [["powershell", "powershell.exe", "pwsh", "pwsh.exe"], "-File"],
+    decision = "allow",
+    justification = "Project PowerShell scripts are allowed when executed as script files.",
+    match = [
+        "powershell -File scripts/example.ps1",
+        "pwsh -File scripts/example.ps1",
+    ],
+)
+
+prefix_rule(
+    pattern = [["powershell", "powershell.exe", "pwsh", "pwsh.exe"], "-NoProfile", "-File"],
+    decision = "allow",
+    justification = "Project PowerShell scripts are allowed when executed as script files.",
+    match = [
+        "powershell -NoProfile -File scripts/example.ps1",
+        "pwsh -NoProfile -File scripts/example.ps1",
+    ],
+)
+
+prefix_rule(
+    pattern = ["pnpm", ["test", "typecheck", "lint", "format"]],
+    decision = "allow",
+    justification = "Top-level build, test, lint, typecheck, and format scripts are allowed.",
+    match = [
+        "pnpm test",
+        "pnpm typecheck",
+        "pnpm lint",
+        "pnpm format",
+    ],
+)
+
+prefix_rule(
+    pattern = ["pnpm", "-r", ["test", "typecheck", "build"]],
+    decision = "allow",
+    justification = "Workspace test, typecheck, and build commands are allowed.",
+    match = [
+        "pnpm -r test",
+        "pnpm -r typecheck",
+        "pnpm -r build",
+    ],
+)
+
+prefix_rule(
+    pattern = ["pnpm", "--filter", "@crp/core", ["test", "typecheck", "build"]],
+    decision = "allow",
+    justification = "@crp/core package verification commands are allowed.",
+    match = [
+        "pnpm --filter @crp/core test",
+        "pnpm --filter @crp/core typecheck",
+        "pnpm --filter @crp/core build",
+    ],
+)
+
+prefix_rule(
+    pattern = ["pnpm", "--filter", "@crp/cli", ["test", "typecheck", "build"]],
+    decision = "allow",
+    justification = "@crp/cli package verification commands are allowed.",
+    match = [
+        "pnpm --filter @crp/cli test",
+        "pnpm --filter @crp/cli typecheck",
+        "pnpm --filter @crp/cli build",
+    ],
+)
+
+prefix_rule(
+    pattern = ["pnpm", "--filter", "@crp/cli", "crp", "validate", "sample"],
+    decision = "allow",
+    justification = "Sample validation is a routine project verification command.",
+    match = [
+        "pnpm --filter @crp/cli crp validate sample",
+    ],
+)
+
+prefix_rule(
+    pattern = ["pnpm", "--filter", "@crp/extension", ["test", "typecheck", "build"]],
+    decision = "allow",
+    justification = "@crp/extension package verification and packaging commands are allowed.",
+    match = [
+        "pnpm --filter @crp/extension test",
+        "pnpm --filter @crp/extension typecheck",
+        "pnpm --filter @crp/extension build",
+    ],
+)
+
+prefix_rule(
+    pattern = [["rm", "Remove-Item", "del", "rmdir", "rd"]],
+    decision = "prompt",
+    justification = "Deletion commands require approval.",
+    match = [
+        "rm old-file.txt",
+        "Remove-Item old-file.txt",
+        "del old-file.txt",
+        "rmdir old-dir",
+        "rd old-dir",
+    ],
+)
+
+prefix_rule(
+    pattern = [["npm", "pnpm"], ["install", "add"], "-g"],
+    decision = "prompt",
+    justification = "Global package installation changes machine state; require approval.",
+    match = [
+        "npm install -g some-tool",
+        "pnpm add -g some-tool",
+    ],
+)
+
+prefix_rule(
+    pattern = [["winget", "choco", "scoop", "Set-ExecutionPolicy"]],
+    decision = "prompt",
+    justification = "System package management or global PowerShell policy changes require approval.",
+    match = [
+        "winget install Git.Git",
+        "choco install nodejs",
+        "scoop install nodejs",
+        "Set-ExecutionPolicy RemoteSigned",
+    ],
+)
