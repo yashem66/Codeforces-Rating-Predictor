@@ -1,12 +1,17 @@
 # Codeforces Rating Predictor — Chrome 插件 设计文档
 
 - 日期：2026-06-28
-- 状态：协调者（orchestrator）指定，分发给 Sonnet 子代理实现
+- 状态：历史设计记录（已实现并演进；当前说明见 `docs/extension.md`、`docs/api-notes.md`）
 - 前置：核心算法包 `@crp/core` 已完成并验证（见 `2026-06-28-rating-predictor-core-design.md` 与 `validation-results.md`）
+
+> 2026-06-29 刷新说明：本文记录最初的 Chrome 扩展设计。当前实现已追加镜像域名匹配、final ratings
+> HTML fallback、standings DOM fallback、自适应分页抓取、unofficial 行过滤、debug 强制 DOM 预测开关、
+> rating 颜色和列宽样式。最新使用和维护说明见 `docs/extension.md`。
 
 ## 1. 目标
 
 在 Codeforces 比赛 Standing 页面注入两列：
+
 - **Rating**：该行选手的当前 rating。
 - **Pred Rating Delta**：预估 rating 变化（进行中比赛）或实际变化（已结束比赛）。
 
@@ -17,7 +22,7 @@
 - 位置：monorepo 新包 `packages/extension`。
 - 构建：**Vite + @crxjs/vite-plugin**，Manifest V3，TypeScript（strict）。
 - UI：**原生 DOM** 注入表格列（无需 React）；一个极简 **popup**（HTML+TS）做列开关与设置。
-- 依赖：`@crp/core`（workspace:*）。
+- 依赖：`@crp/core`（workspace:\*）。
 - 测试：**vitest + jsdom**（纯逻辑单测 + 注入逻辑的 DOM 集成测试，喂样本 standings HTML + mock API）。
 - 不引入后端；所有计算在浏览器内完成。
 
@@ -30,11 +35,13 @@
 ## 4. 数据流
 
 ### 4.1 已结束的 rated 比赛
+
 1. 调 `contest.ratingChanges?contestId={id}`（匿名）。若返回非空 → 该赛已计分。
 2. 用每行的 `oldRating` 填 “Rating” 列、`newRating-oldRating` 填 “Pred Rating Delta” 列（此为**真实值**，精确）。
 3. 若返回空/unavailable → 视为未计分或未结算，回退到“进行中”逻辑或显示“未计分”。
 
 ### 4.2 进行中 / 未结算的比赛（预测）
+
 1. 调 `contest.standings?contestId={id}`（匿名、仅一个参数）→ 取官方 `rows`（含 `party.members[].handle`、`rank`、`points`、`penalty`）。
 2. 收集所有 handle，调 `user.info?handles=h1;h2;...`（**分批**，每批 ≤ 10000）→ 取每人当前显示 rating；**未评分用户**（无 rating 字段）记为新账号。
 3. 构造 `Contestant[]`：`{ party: handle, rank, rating }`，其中 `rating = 未评分 ? 1400 : 当前显示 rating`。
@@ -98,5 +105,5 @@ packages/extension/
 ## 10. 不在本期范围
 
 - 直播下逐人 `user.rating` 精确 k（限频不可扩展）；如需更高精度，作为后续增强（对少量疑似新账号选择性取 user.rating）。
-- performance 列、升档所需 delta 列（core 已预留接口，可作后续）。
+- performance 列、升档所需 delta 列（`performanceRating` 已存在；升档 delta 仍需后续 API 设计）。
 - Firefox/移动端适配（先 Chrome）。

@@ -1,12 +1,15 @@
 # Codeforces Rating Predictor 核心算法 + 离线验证 + 基建 实现计划
 
+> 2026-06-29 刷新说明：这是历史执行计划，不是最新任务清单。当前实现和命令以 `README.md`、
+> `docs/algorithm.md`、`docs/cli.md`、`docs/development.md` 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 搭建一个 TypeScript monorepo，实现可复用的 Codeforces rating 预测算法核心包，并用真实比赛数据离线验证其准确度，同时补齐工程基建与 Cursor Agent 文件。
 
-**Architecture:** `packages/core` 是零 I/O 纯函数算法库（在“计算分/1400 基准”空间运算，含显示分↔计算分换算、两步通胀修正）。算法有两条等价实现：朴素 O(N²) 版作为正确性基准与小赛路径；FFT O(N log N) 版用于全量大赛。`packages/cli` 是 Node 工具，负责枚举/抓取 `contest.ratingChanges`、缓存到磁盘、从全量语料构建“全局参赛索引”反推每人赛前场次 k、调用 core、与官方真值对比并输出误差报告。core 接口为未来浏览器插件预留（performance / deltaToRankUp）。
+**Architecture:** `packages/core` 是零 I/O 纯函数算法库（在“计算分/1400 基准”空间运算，含显示分↔计算分换算、两步通胀修正）。算法有两条等价实现：朴素 O(N²) 版作为正确性基准与小赛路径；FFT O(N log N) 版用于全量大赛。`packages/cli` 是 Node 工具，负责枚举/抓取 `contest.ratingChanges`、缓存到磁盘、从全量语料构建“全局参赛索引”反推每人赛前场次 k、调用 core、与官方真值对比并输出误差报告。当前 core 已提供 `performanceRating`，升档 delta 仍需后续 API 设计。
 
-**Scope:** 本计划包含**全量验证**——枚举 2020-05 起的全部 rated 比赛建立 k 索引，并验证 2022-01 至今全部 rated 个人赛（窗口可配置、可按评分机制变动缩小）。
+**Scope:** 本计划包含**全量验证**——当前实现默认枚举 2020-01 起的全部 rated 比赛建立 k 索引，并验证 2022-01 至今全部 rated 个人赛（窗口可配置、可按评分机制变动缩小）。
 
 **Tech Stack:** pnpm workspaces、TypeScript（strict）、Vitest、tsx、ESLint、Prettier、GitHub Actions、Node ≥ 18（内置 fetch）；自实现 FFT 卷积。
 
@@ -18,13 +21,15 @@
 - 整数算术与截断：CF 参考实现用整数除法向零截断。TS 中对应位置一律用 `Math.trunc`，务必与下文代码一致，否则会出现 ±1 误差。
 - 提交信息使用 Conventional Commits（`feat:` / `test:` / `chore:` / `docs:`）。
 - 测试命令统一用 pnpm filter：`pnpm --filter @crp/core test`、`pnpm --filter @crp/cli test`。
-- 注意：当前 shell 若不可用，需先恢复终端再执行带命令的步骤；文件创建步骤不受影响。
+- 注意：本仓库当前 `AGENTS.md` 要求所有 Shell 命令带 `required_permissions: ["all"]`；不要在 `no exit status`
+  上排查终端集成问题。
 
 ---
 
 ## Task 0: 根 monorepo 脚手架
 
 **Files:**
+
 - Create: `package.json`
 - Create: `pnpm-workspace.yaml`
 - Create: `tsconfig.base.json`
@@ -37,7 +42,7 @@
 
 ```yaml
 packages:
-  - "packages/*"
+  - 'packages/*'
 ```
 
 - [ ] **Step 2: 创建根 `package.json`**
@@ -146,6 +151,7 @@ git commit -m "chore: scaffold pnpm monorepo with ts/eslint/prettier/vitest"
 ## Task 1: `@crp/core` 包脚手架与类型
 
 **Files:**
+
 - Create: `packages/core/package.json`
 - Create: `packages/core/tsconfig.json`
 - Create: `packages/core/src/types.ts`
@@ -227,6 +233,7 @@ git commit -m "feat(core): scaffold @crp/core package and core types"
 ## Task 2: Elo 概率与 seed（TDD）
 
 **Files:**
+
 - Create: `packages/core/src/elo.ts`
 - Test: `packages/core/test/elo.test.ts`
 - Modify: `packages/core/src/index.ts`
@@ -325,6 +332,7 @@ git commit -m "feat(core): add elo win probability and seed"
 ## Task 3: 新账号显示分↔计算分换算（TDD）
 
 **Files:**
+
 - Create: `packages/core/src/newAccount.ts`
 - Test: `packages/core/test/newAccount.test.ts`
 - Modify: `packages/core/src/index.ts`
@@ -425,6 +433,7 @@ git commit -m "feat(core): add new-account display/calc rating conversion"
 ## Task 4: 核心评分变化算法 `computeRatingChanges`（TDD）
 
 **Files:**
+
 - Create: `packages/core/src/rating.ts`
 - Test: `packages/core/test/rating.test.ts`
 - Modify: `packages/core/src/index.ts`
@@ -615,9 +624,10 @@ git commit -m "feat(core): implement computeRatingChanges (CF rating algorithm)"
 
 ---
 
-## Task 5: performance / deltaToRankUp（为未来直播预留，TDD）
+## Task 5: performanceRating（为未来直播预留，TDD）
 
 **Files:**
+
 - Create: `packages/core/src/performance.ts`
 - Test: `packages/core/test/performance.test.ts`
 - Modify: `packages/core/src/index.ts`
@@ -714,6 +724,7 @@ git commit -m "feat(core): add performanceRating for future live mode"
 ## Task 6: `@crp/cli` 包脚手架
 
 **Files:**
+
 - Create: `packages/cli/package.json`
 - Create: `packages/cli/tsconfig.json`
 - Create: `packages/cli/src/types.ts`
@@ -810,6 +821,7 @@ git commit -m "feat(cli): scaffold @crp/cli package and CF API types"
 ## Task 7: 磁盘缓存（TDD）
 
 **Files:**
+
 - Create: `packages/cli/src/cache.ts`
 - Test: `packages/cli/test/cache.test.ts`
 
@@ -910,6 +922,7 @@ git commit -m "feat(cli): add JSON disk cache"
 ## Task 8: CF API 客户端（限频 + 缓存 + 重试，TDD）
 
 **Files:**
+
 - Create: `packages/cli/src/api.ts`
 - Test: `packages/cli/test/api.test.ts`
 
@@ -1083,6 +1096,7 @@ git commit -m "feat(cli): add rate-limited, cached Codeforces API client"
 ## Task 9: 参赛场次解析 contestCounts（TDD）
 
 **Files:**
+
 - Create: `packages/cli/src/contestCounts.ts`
 - Test: `packages/cli/test/contestCounts.test.ts`
 
@@ -1141,10 +1155,7 @@ import type { ApiUserRatingEntry } from './types.js';
  * 给定某 handle 的完整 rating 历史，返回在 ratingUpdateTime 严格早于
  * beforeTimeSeconds 的比赛场次数（即该用户进入目标比赛前已完成的 rated 场次 k）。
  */
-export function priorRatedCount(
-  history: ApiUserRatingEntry[],
-  beforeTimeSeconds: number,
-): number {
+export function priorRatedCount(history: ApiUserRatingEntry[], beforeTimeSeconds: number): number {
   let count = 0;
   for (const e of history) {
     if (e.ratingUpdateTimeSeconds < beforeTimeSeconds) count++;
@@ -1170,6 +1181,7 @@ git commit -m "feat(cli): add prior rated contest count resolver"
 ## Task 10: 验证流水线 validate（TDD）
 
 **Files:**
+
 - Create: `packages/cli/src/validate.ts`
 - Test: `packages/cli/test/validate.test.ts`
 
@@ -1370,6 +1382,7 @@ git commit -m "feat(cli): add contest validation pipeline with error metrics"
 ## Task 11: 数据集编排 dataset（样本清单 + 抓取，TDD）
 
 **Files:**
+
 - Create: `packages/cli/src/dataset.ts`
 - Test: `packages/cli/test/dataset.test.ts`
 
@@ -1394,8 +1407,24 @@ describe('buildPriorCounts', () => {
       [
         'a',
         [
-          { contestId: 1, contestName: '', handle: 'a', rank: 1, ratingUpdateTimeSeconds: 50, oldRating: 0, newRating: 0 },
-          { contestId: 2, contestName: '', handle: 'a', rank: 1, ratingUpdateTimeSeconds: 150, oldRating: 0, newRating: 0 },
+          {
+            contestId: 1,
+            contestName: '',
+            handle: 'a',
+            rank: 1,
+            ratingUpdateTimeSeconds: 50,
+            oldRating: 0,
+            newRating: 0,
+          },
+          {
+            contestId: 2,
+            contestName: '',
+            handle: 'a',
+            rank: 1,
+            ratingUpdateTimeSeconds: 150,
+            oldRating: 0,
+            newRating: 0,
+          },
         ],
       ],
       ['b', []],
@@ -1457,7 +1486,10 @@ export function buildPriorCounts(
 export async function fetchContestData(
   api: CodeforcesApi,
   contestId: number,
-): Promise<{ rows: Awaited<ReturnType<CodeforcesApi['getRatingChanges']>>; priorCounts: Map<string, number> }> {
+): Promise<{
+  rows: Awaited<ReturnType<CodeforcesApi['getRatingChanges']>>;
+  priorCounts: Map<string, number>;
+}> {
   const rows = await api.getRatingChanges(contestId);
   if (rows.length === 0) {
     return { rows, priorCounts: new Map() };
@@ -1497,6 +1529,7 @@ git commit -m "feat(cli): add sample dataset list and per-contest data fetch"
 ## Task 12: CLI 入口接线（fetch / validate / report）
 
 **Files:**
+
 - Create: `packages/cli/src/cli.ts`
 - Create: `packages/cli/src/report.ts`
 - Test: `packages/cli/test/report.test.ts`
@@ -1575,9 +1608,7 @@ export interface AggregateResult {
   maxAbsError: number;
 }
 
-export function aggregate(
-  items: { contestId: number; report: ContestReport }[],
-): AggregateResult {
+export function aggregate(items: { contestId: number; report: ContestReport }[]): AggregateResult {
   let totalN = 0;
   let exactSum = 0;
   let maxAbsError = 0;
@@ -1681,6 +1712,7 @@ git commit -m "feat(cli): wire up fetch/validate commands and report formatting"
 ## Task 13: 文档、Cursor Agent 文件与 CI
 
 **Files:**
+
 - Create: `README.md`（覆盖现有单行内容）
 - Create: `AGENTS.md`
 - Create: `.cursor/rules/project.mdc`
@@ -1690,11 +1722,11 @@ git commit -m "feat(cli): wire up fetch/validate commands and report formatting"
 
 - [ ] **Step 1: 覆盖 `README.md`**
 
-```markdown
+````markdown
 # Codeforces Rating Predictor
 
 辅助 Codeforces 竞赛的工具集：核心是 rating 预测算法，目标是为浏览器插件在 Standing
-中展示 `Rating` 与 `Pred Rating Delta`。本仓库当前阶段聚焦核心算法与离线验证。
+中展示 `Rating` 与 `Pred Rating Delta`。这是当时的 README 草稿；当前项目已包含 Chrome 扩展实现。
 
 ## 包结构（pnpm monorepo）
 
@@ -1708,6 +1740,7 @@ pnpm install
 pnpm test                       # 跑所有单测
 pnpm --filter @crp/cli crp validate sample   # 用样本比赛验证算法准确度
 ```
+````
 
 抓取的原始数据缓存在 `data/`（已 gitignore）。
 
@@ -1716,7 +1749,8 @@ pnpm --filter @crp/cli crp validate sample   # 用样本比赛验证算法准确
 - 设计：`docs/superpowers/specs/2026-06-28-rating-predictor-core-design.md`
 - 计划：`docs/superpowers/plans/2026-06-28-rating-predictor-core.md`
 - 算法：`docs/algorithm.md` ／ API 现状：`docs/api-notes.md`
-```
+
+````
 
 - [ ] **Step 2: 创建 `AGENTS.md`**
 
@@ -1744,7 +1778,7 @@ TypeScript monorepo（pnpm）。`packages/core` 为零 I/O 纯算法库；`packa
 
 ## 关键资料
 - 算法说明与出处见 `docs/algorithm.md`，CF API 现状见 `docs/api-notes.md`。
-```
+````
 
 - [ ] **Step 3: 创建 `.cursor/rules/project.mdc`**
 
@@ -1767,6 +1801,7 @@ alwaysApply: true
 # Codeforces 评分算法说明
 
 ## 公式（计算分空间）
+
 - 胜率：`P(I 胜 J) = 1 / (1 + 10^((rJ - rI) / 400))`
 - 期望名次：`seed_i = 1 + Σ_{j≠i} P(j 胜 i)`
 - 几何平均：`m_i = sqrt(seed_i * rank_i)`（rank_i 为实际名次，并列共享同名次）
@@ -1776,15 +1811,18 @@ alwaysApply: true
   `inc = clamp(trunc(-Σd_s / s), -10, 0)`，全员加
 
 ## 2020 新账号规则
+
 - 计算分从 1400 起，显示分从 0 起；前 6 场显示分叠加 500/350/250/150/100/50。
 - “计算分 − 显示分”偏移（按已完成 rated 场次 k）：`[1400,900,550,300,150,50]`，k≥6 为 0。
 
 ## 准确度与已知近似
+
 - 成熟用户（k≥6）应逐人精确命中。
 - 残余误差主要来源：并列名次的名次取值约定、取整时机、二分边界、极端低分被 [1,8000] 钳制。
   这些通过 `crp validate` 的最差 mismatch 清单驱动定位与修正。
 
 ## 出处
+
 - 2015 算法：https://codeforces.com/blog/entry/20762
 - 2020 新账号：https://codeforces.com/blog/entry/77890
 - 参考实现 Carrot：https://github.com/meooow25/carrot
@@ -1797,6 +1835,7 @@ alwaysApply: true
 # Codeforces API 现状（2026 记录）
 
 ## 端点
+
 - `contest.ratingChanges?contestId=X`：返回每人 `handle/rank/oldRating/newRating`（均为显示分）。
   作为离线验证真值。已实测可用。
 - `contest.standings?contestId=X`：2026-04 曾被限制为仅 gym/mashup；现已恢复
@@ -1806,6 +1845,7 @@ alwaysApply: true
 - `user.info?handles=...`：批量当前显示 rating（未来直播取选手当前分用）。
 
 ## 注意
+
 - API 返回的是“显示分”：`ratingChanges` 中出现过 `oldRating:0`（计算分不可能为 0），
   证明需要做显示分↔计算分换算。
 - 限频：客户端约 1 req / 2.1s，并对 5xx / “limit exceeded” 做指数退避重试 + 磁盘缓存。
@@ -1856,6 +1896,7 @@ git commit -m "docs: add README, AGENTS, cursor rules, algorithm/API notes and C
 > 这是小样本检查点，用于在投入全量前确认算法正确。全量验证见 Task 15–20。
 
 **Files:**
+
 - Modify（按需）: `packages/core/src/rating.ts`
 - Create: `docs/validation-results.md`
 
@@ -1867,6 +1908,7 @@ Expected: 打印每场报告与 AGGREGATE 行。记录 `weightedExactRate` 与 `
 - [ ] **Step 2: 分析最差 mismatch**
 
 查看每场报告的 `worst` 列表，判断误差来源：
+
 - 若集中在 `k < 6` 的新账号 → 检查换算（Task 3）与 k 计算（Task 9/11）。
 - 若集中在并列名次选手 → 调整 `computeRatingChanges` 中并列名次取值（见下一步）。
 - 若是普遍 ±1 → 检查 `Math.trunc` 与二分返回值。
@@ -1923,6 +1965,7 @@ git commit -m "test: validate algorithm on sample contests and record results"
 ## Task 15: FFT 复数卷积（TDD）
 
 **Files:**
+
 - Create: `packages/core/src/fft.ts`
 - Test: `packages/core/test/fft.test.ts`
 
@@ -2070,6 +2113,7 @@ git commit -m "feat(core): add iterative FFT real convolution"
 ## Task 16: FFT 加速版评分算法 `computeRatingChangesFast`（TDD：与朴素版等价）
 
 **Files:**
+
 - Create: `packages/core/src/ratingFast.ts`
 - Test: `packages/core/test/ratingFast.test.ts`
 - Modify: `packages/core/src/index.ts`
@@ -2246,6 +2290,7 @@ git commit -m "feat(core): add FFT-accelerated computeRatingChangesFast"
 ## Task 17: 比赛枚举与日期过滤（TDD）
 
 **Files:**
+
 - Create: `packages/cli/src/contests.ts`
 - Test: `packages/cli/test/contests.test.ts`
 
@@ -2338,6 +2383,7 @@ git commit -m "feat(cli): add contest enumeration and date filtering"
 ## Task 18: 全局参赛索引（TDD）
 
 **Files:**
+
 - Create: `packages/cli/src/participationIndex.ts`
 - Test: `packages/cli/test/participationIndex.test.ts`
 
@@ -2443,6 +2489,7 @@ git commit -m "feat(cli): add global participation index for k resolution"
 ## Task 19: CLI 全量命令 fetch-all / validate-all
 
 **Files:**
+
 - Modify: `packages/cli/src/cli.ts`
 - Create: `packages/cli/src/full.ts`
 - Test: `packages/cli/test/full.test.ts`
@@ -2478,10 +2525,7 @@ describe('runValidateAll', () => {
     ];
     const data: Record<number, ApiRatingChange[]> = {
       1: [rc('a', 1, 1500, 1500, 100)],
-      2: [
-        rc('a', 1, 1500, 1530, 1000),
-        rc('b', 2, 1500, 1470, 1000),
-      ],
+      2: [rc('a', 1, 1500, 1530, 1000), rc('b', 2, 1500, 1470, 1000)],
     };
     const result = await runValidateAll({
       listContests: async () => contests,
@@ -2492,7 +2536,13 @@ describe('runValidateAll', () => {
         cs.map((c) => {
           const row = data[2]!.find((r) => r.handle === c.party)!;
           const delta = row.newRating - row.oldRating;
-          return { party: c.party, rank: c.rank, oldRating: c.rating, delta, newRating: c.rating + delta };
+          return {
+            party: c.party,
+            rank: c.rank,
+            oldRating: c.rating,
+            delta,
+            newRating: c.rating + delta,
+          };
         }),
     });
     expect(result.validated.map((v) => v.contestId)).toEqual([2]); // 只验证 id=2
@@ -2595,8 +2645,8 @@ import { runValidateAll } from './full.js';
 
 ```ts
 const INDEX_FROM = Math.floor(
-  (Number(process.env.CRP_INDEX_FROM) || Date.parse('2020-05-01T00:00:00Z')) / 1000 ||
-    Date.parse('2020-05-01T00:00:00Z') / 1000,
+  (Number(process.env.CRP_INDEX_FROM) || Date.parse('2020-01-01T00:00:00Z')) / 1000 ||
+    Date.parse('2020-01-01T00:00:00Z') / 1000,
 );
 const VALIDATE_FROM = Math.floor(
   Date.parse(process.env.CRP_VALIDATE_FROM || '2022-01-01T00:00:00Z') / 1000,
@@ -2605,7 +2655,7 @@ const NOW_SEC = Math.floor(Date.now() / 1000);
 ```
 
 > 简化：若需自定义起点，用环境变量 `CRP_VALIDATE_FROM=YYYY-MM-DD`。`INDEX_FROM` 默认
-> 2020-05-01（新账号规则生效点），保证 k 对所有受偏移影响的用户精确。
+> 当前实现默认 2020-01-01，并通过“首场 oldRating==0”判断新评分体系账号，避免老体系用户被误判。
 
 在 `switch (command)` 中，`validate` 分支之后、`default` 之前追加：
 
@@ -2645,7 +2695,7 @@ const NOW_SEC = Math.floor(Date.now() / 1000);
 并把 usage 文案更新为：
 
 ```ts
-      process.stdout.write('usage: crp <fetch|validate|fetch-all|validate-all> [contestId|sample]\n');
+process.stdout.write('usage: crp <fetch|validate|fetch-all|validate-all> [contestId|sample]\n');
 ```
 
 - [ ] **Step 6: 校验类型与测试**
@@ -2665,6 +2715,7 @@ git commit -m "feat(cli): add full-scale fetch-all/validate-all over all rated c
 ## Task 20: 全量验证运行与结果记录
 
 **Files:**
+
 - Modify（按需）: `packages/core/src/ratingFast.ts` 或 `rating.ts`
 - Modify: `docs/validation-results.md`
 
@@ -2681,6 +2732,7 @@ Expected: 打印每场进度与 `FULL AGGREGATE`，并写出 `data/full-report.j
 - [ ] **Step 3: 分析误差来源**
 
 从 `data/full-report.json` 找出 `exactRate` 偏低或 `maxAbsError` 偏大的比赛，结合其 `worst` 列表判断：
+
 - 集中在 `k<6` 新账号 → 复核换算与索引起点 `INDEX_FROM`（是否需更早）。
 - 集中在并列名次 → 按 Task 14 Step 3 的并列规整处理。
 - 普遍 ±1 → 复核 `Math.trunc` 与 FFT 浮点（必要时对低置信样本用朴素版复算）。
@@ -2700,12 +2752,14 @@ Expected（成功标准）：窗口内成熟用户 `exactRate` 接近 100%；整
 # 验证结果
 
 ## 样本（checkpoint）
+
 - 命令：`crp validate sample`
 - weightedExactRate / medianAbsError / maxAbsError：<实测>
 
 ## 全量
+
 - 命令：`crp fetch-all` + `crp validate-all`
-- 窗口：INDEX_FROM=2020-05-01，VALIDATE_FROM=2022-01-01（如调整请注明）
+- 窗口：INDEX_FROM=2020-01-01，VALIDATE_FROM=2022-01-01（如调整请注明）
 - 比赛场数 / totalN：<实测>
 - weightedExactRate：<实测>
 - maxAbsError：<实测>
@@ -2717,14 +2771,15 @@ Expected（成功标准）：窗口内成熟用户 `exactRate` 接近 100%；整
 - [ ] **Step 6: 提交**
 
 ```bash
-git add docs/validation-results.md packages/core/src/ratingFast.ts packages/core/src/rating.ts data/full-report.json
+git add docs/validation-results.md packages/core/src/ratingFast.ts packages/core/src/rating.ts
 git commit -m "test: full-scale validation over rated contests and record results"
 ```
 
-> 注：若 `data/` 被 .gitignore，可改为提交一份精简后的汇总（去掉超大明细）或仅提交 `docs/validation-results.md`。
+> 注：`data/` 是本地缓存和报告目录，已被 .gitignore；不要提交 `data/full-report.json`。
 
 ---
 
 ## 后续（不在本计划）
+
 - 新建独立 spec：Chrome 插件 UI（注入 `Rating` / `Pred Rating Delta` 两列、直播实时刷新、为全体选手获取 k 的折中方案）。
 - 直播模式下 k 的获取（无法离线建索引时的折中：user.info + 选择性 user.rating）。
